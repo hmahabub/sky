@@ -1,0 +1,141 @@
+{% extends 'base/base.html' %}
+{% load static %}
+
+{% block title %}Stock Adjustment - SkyTex ERP{% endblock %}
+
+{% block page_title %}Create Stock Adjustment{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="stat-card">
+                <form method="post" id="adjustmentForm">
+                    {% csrf_token %}
+                    
+                    {% if form.errors %}
+                        <div class="alert alert-danger">
+                            <h6>Please fix the following errors:</h6>
+                            <ul class="mb-0">
+                                {% for field, errors in form.errors.items %}
+                                    <li>{{ field }}: {{ errors|join:", " }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    {% endif %}
+
+                    <div class="alert alert-info py-2 small mb-3">
+                        <i class="fas fa-info-circle"></i>
+                        The adjustment number is generated automatically (format: <code>SA-YYMMDD-00001</code>).
+                        Stock can never be reduced below 0 - if you try, you'll get an error here instead.
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Direction *</label>
+                                {{ form.direction }}
+                                <div class="form-text">Are you adding stock or removing it?</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Adjustment Type *</label>
+                                {{ form.adjustment_type }}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Adjustment Date *</label>
+                                {{ form.adjustment_date }}
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Quantity *</label>
+                                {{ form.quantity }}
+                                <div class="form-text">Always a positive amount - direction above decides add or remove.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-secondary py-2 small">
+                        Adjust exactly <strong>one</strong> of the items below.
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Fabric</label>
+                                {{ form.fabric }}
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Fabric Roll <span class="text-muted">(optional, for tracking only)</span></label>
+                                {{ form.fabric_roll }}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Trim</label>
+                                {{ form.trim }}
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Finished Goods</label>
+                                {{ form.finished_goods }}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Reason *</label>
+                        {{ form.reason }}
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        {{ form.notes }}
+                    </div>
+                    
+                    <div class="mt-4 border-top pt-3">
+                        <button type="submit" class="btn btn-gradient">
+                            <i class="fas fa-save"></i> Create Adjustment
+                        </button>
+                        <a href="{% url 'inventory:stock_adjustments' %}" class="btn btn-secondary">
+                            <i class="fas fa-times"></i> Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Selecting one of fabric/trim/finished goods clears the other two, so
+    // the "exactly one target" rule is obvious before you even submit.
+    document.addEventListener('DOMContentLoaded', function () {
+        const fabric = document.getElementById('id_fabric');
+        const trim = document.getElementById('id_trim');
+        const finishedGoods = document.getElementById('id_finished_goods');
+        const targets = [fabric, trim, finishedGoods];
+
+        targets.forEach(field => {
+            field.addEventListener('change', function () {
+                if (field.value) {
+                    targets.filter(f => f !== field).forEach(other => other.value = '');
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}
