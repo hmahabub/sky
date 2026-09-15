@@ -160,6 +160,25 @@ class FinishedGoodsForm(forms.ModelForm):
             'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
 
+class FinishedGoodsStockInForm(forms.Form):
+    """
+    Adds stock to an existing finished goods item - e.g. a production batch
+    just came off the line. Deliberately standalone (not a ModelForm) since
+    it doesn't map to a single model: it bumps FinishedGoods.quantity_in_stock
+    and quantity_produced, and logs a StockMovement, without needing a style,
+    buyer or supplier from another module.
+    """
+    quantity = forms.IntegerField(
+        min_value=1,
+        widget=forms.NumberInput(attrs={'class': 'form-control'}),
+        help_text="How many units to add to stock.",
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        help_text="Optional - e.g. batch/reference number.",
+    )
+
 class DispatchForm(forms.ModelForm):
     class Meta:
         model = Dispatch

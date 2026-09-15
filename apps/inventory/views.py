@@ -22,7 +22,8 @@ from .forms import (
     FabricForm, FabricRollForm, TrimForm, GoodsReceiptForm,
     GoodsReceiptDetailForm, TrimReceiptForm, TrimReceiptDetailForm,
     ProductionIssueForm, ProductionIssueDetailForm,
-    FinishedGoodsForm, DispatchForm, DispatchDetailForm, StockAdjustmentForm
+    FinishedGoodsForm, FinishedGoodsStockInForm,
+    DispatchForm, DispatchDetailForm, StockAdjustmentForm
 )
 
 def is_inventory_or_admin(user):
@@ -546,11 +547,29 @@ def add_production_issue(request):
                         fabric = detail.fabric
                         fabric.current_stock -= detail.quantity_issued
                         fabric.save()
+                        StockMovement.objects.create(
+                            movement_type='issue',
+                            reference_number=issue.issue_number,
+                            reference_id=issue.pk,
+                            fabric=fabric,
+                            quantity=-detail.quantity_issued,
+                            notes=f"Issued to production - {issue.style.style_number}",
+                            created_by=request.user,
+                        )
                     elif detail.trim:
                         trim = detail.trim
                         trim.current_stock -= int(detail.quantity_issued)
                         trim.save()
-                    
+                        StockMovement.objects.create(
+                            movement_type='issue',
+                            reference_number=issue.issue_number,
+                            reference_id=issue.pk,
+                            trim=trim,
+                            quantity=-detail.quantity_issued,
+                            notes=f"Issued to production - {issue.style.style_number}",
+                            created_by=request.user,
+                        )
+
                     # Update fabric roll if used
                     if detail.fabric_roll:
                         roll = detail.fabric_roll
@@ -579,19 +598,36 @@ def add_production_issue(request):
 def finished_goods_list(request):
     """List all finished goods"""
     finished_goods = FinishedGoods.objects.filter(is_active=True)
-    
+
     # Search
     search = request.GET.get('search')
     if search:
         finished_goods = finished_goods.filter(
-            Q(sku_code__icontains=search)
+            Q(sku_code__icontains=search) |
+            Q(size__icontains=search) |
+            Q(color__icontains=search)
         )
-    
+
+    # Filter by stock status
+    stock_status = request.GET.get('stock_status')
+    if stock_status == 'low':
+        finished_goods = finished_goods.filter(quantity_in_stock__gt=0, quantity_in_stock__lte=F('reorder_level'))
+    elif stock_status == 'out':
+        finished_goods = finished_goods.filter(quantity_in_stock=0)
+    elif stock_status == 'normal':
+        finished_goods = finished_goods.filter(quantity_in_stock__gt=F('reorder_level'))
+
+    # Pagination
+    paginator = Paginator(finished_goods, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+
     context = {
         'active': 'inventory',
         'page_title': 'Finished Goods',
-        'finished_goods': finished_goods,
+        'finished_goods': page_obj,
         'search': search,
+        'current_stock_status': stock_status,
     }
     return render(request, 'inventory/finished_goods.html', context)
 
@@ -607,13 +643,105 @@ def add_finished_goods(request):
             return redirect('inventory:finished_goods_list')
     else:
         form = FinishedGoodsForm()
-    
+
     context = {
         'active': 'inventory',
         'page_title': 'Add Finished Goods',
         'form': form,
     }
     return render(request, 'inventory/finished_goods_form.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def edit_finished_goods(request, pk):
+    """Edit finished goods"""
+    finished = get_object_or_404(FinishedGoods, pk=pk)
+    if request.method == 'POST':
+        form = FinishedGoodsForm(request.POST, instance=finished)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Finished goods "{finished.sku_code}" updated successfully!')
+            return redirect('inventory:finished_goods_list')
+    else:
+        form = FinishedGoodsForm(instance=finished)
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Edit Finished Goods',
+        'form': form,
+        'finished_goods': finished,
+    }
+    return render(request, 'inventory/finished_goods_form.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def add_finished_goods_stock(request, pk):
+    """
+    Add stock to a finished goods item - e.g. a production batch just came
+    off the line. Deliberately self-contained within Inventory: no style,
+    buyer or supplier from another module is required.
+    """
+    finished = get_object_or_404(FinishedGoods, pk=pk)
+    if request.method == 'POST':
+        form = FinishedGoodsStockInForm(request.POST)
+        if form.is_valid():
+            quantity = form.cleaned_data['quantity']
+            with transaction.atomic():
+                FinishedGoods.objects.filter(pk=finished.pk).update(
+                    quantity_in_stock=F('quantity_in_stock') + quantity,
+                    quantity_produced=F('quantity_produced') + quantity,
+                )
+                movement = StockMovement.objects.create(
+                    movement_type='production',
+                    reference_number='',
+                    reference_id=finished.pk,
+                    finished_goods=finished,
+                    quantity=quantity,
+                    notes=form.cleaned_data['notes'],
+                    created_by=request.user,
+                )
+                movement.reference_number = movement.movement_number
+                movement.save(update_fields=['reference_number'])
+
+            messages.success(request, f'Added {quantity} units to "{finished.sku_code}" stock.')
+            return redirect('inventory:finished_goods_stock_ledger', pk=finished.pk)
+    else:
+        form = FinishedGoodsStockInForm()
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Add Stock',
+        'form': form,
+        'finished_goods': finished,
+    }
+    return render(request, 'inventory/finished_goods_stock_in_form.html', context)
+
+@login_required
+def finished_goods_stock_ledger(request, pk):
+    """
+    All stock-affecting activity (Dispatches and Stock Adjustments) for a
+    single finished goods item, newest first, with a running balance.
+    """
+    finished = get_object_or_404(FinishedGoods, pk=pk)
+    movements = list(
+        StockMovement.objects.filter(finished_goods=finished).order_by('movement_date', 'created_at')
+    )
+
+    total_delta = sum((m.quantity for m in movements), Decimal('0'))
+    running_balance = Decimal(finished.quantity_in_stock) - total_delta
+    for movement in movements:
+        running_balance += movement.quantity
+        movement.balance_after = running_balance
+
+    movements.reverse()  # newest first for display
+
+    context = {
+        'active': 'inventory',
+        'page_title': f'Stock Ledger - {finished.sku_code}',
+        'finished_goods': finished,
+        'movements': movements,
+    }
+    return render(request, 'inventory/finished_goods_stock_ledger.html', context)
 
 @login_required
 def dispatches(request):
@@ -669,6 +797,15 @@ def add_dispatch(request):
                         fg.quantity_in_stock -= detail.quantity
                         fg.quantity_dispatched += detail.quantity
                         fg.save()
+                        StockMovement.objects.create(
+                            movement_type='dispatch',
+                            reference_number=dispatch.dispatch_number,
+                            reference_id=dispatch.pk,
+                            finished_goods=fg,
+                            quantity=-detail.quantity,
+                            notes=f"Dispatched to {dispatch.buyer.buyer_name}",
+                            created_by=request.user,
+                        )
             
             dispatch.total_quantity = total_quantity
             dispatch.save()

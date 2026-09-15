@@ -33,6 +33,9 @@ urlpatterns = [
     # Finished Goods
     path('finished-goods/', views.finished_goods_list, name='finished_goods_list'),
     path('finished-goods/add/', views.add_finished_goods, name='add_finished_goods'),
+    path('finished-goods/<int:pk>/edit/', views.edit_finished_goods, name='edit_finished_goods'),
+    path('finished-goods/<int:pk>/add-stock/', views.add_finished_goods_stock, name='add_finished_goods_stock'),
+    path('finished-goods/<int:pk>/ledger/', views.finished_goods_stock_ledger, name='finished_goods_stock_ledger'),
     
     # Dispatches
     path('dispatches/', views.dispatches, name='dispatches'),

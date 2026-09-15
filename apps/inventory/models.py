@@ -451,6 +451,7 @@ class StockMovement(models.Model):
     """
     MOVEMENT_TYPES = [
         ('receipt', 'Goods Receipt'),
+        ('production', 'Production / Stock In'),
         ('issue', 'Production Issue'),
         ('return', 'Return to Store'),
         ('adjustment', 'Stock Adjustment'),
