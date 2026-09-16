@@ -42,6 +42,14 @@
         font-size: 0.8rem;
         margin-bottom: 0.5rem;
     }
+    .readonly-code {
+        padding: 0.3rem 0.5rem;
+        font-size: 0.85rem;
+        background: #f1f3f5;
+        border: 1px solid #dee2e6;
+        border-radius: 0.25rem;
+        font-weight: 600;
+    }
 </style>
 
 <div class="container-fluid">
@@ -63,12 +71,14 @@
                     {% endif %}
 
                     <div class="row g-2">
+                        {% if fabric %}
                         <div class="col-md-4">
                             <div class="mb-3">
-                                <label class="form-label">Fabric Code *</label>
-                                {{ form.fabric_code }}
+                                <label class="form-label">Fabric Code</label>
+                                <div class="readonly-code">{{ fabric.fabric_code }}</div>
                             </div>
                         </div>
+                        {% endif %}
                         <div class="col-md-4">
                             <div class="mb-3">
                                 <label class="form-label">Fabric Name *</label>
@@ -84,7 +94,7 @@
                     </div>
 
                     <div class="row g-2">
-                        
+
                         <div class="col-md-4">
                             <div class="mb-3">
                                 <label class="form-label">Color *</label>
@@ -106,7 +116,7 @@
                     </div>
 
                     <div class="row g-2">
-                        
+
                         <div class="col-md-4">
                             <div class="mb-3">
                                 <label class="form-label">Unit *</label>
@@ -127,15 +137,32 @@
                         </div>
                     </div>
 
-                    <h6 class="border-bottom">Stock Levels</h6>
+                    <h6 class="border-bottom">Order Reference (optional)</h6>
 
                     <div class="row g-2">
                         <div class="col-md-4">
                             <div class="mb-3">
-                                <label class="form-label">Reorder Level</label>
-                                {{ form.reorder_level }}
+                                <label class="form-label">Style</label>
+                                {{ form.style }}
                             </div>
                         </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Purchase Order</label>
+                                {{ form.purchase_order }}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Buyer</label>
+                                {{ form.buyer }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6 class="border-bottom">Stock Levels</h6>
+
+                    <div class="row g-2">
                         <div class="col-md-4">
                             <div class="mb-3">
                                 <label class="form-label">Minimum Stock</label>
@@ -149,6 +176,26 @@
                             </div>
                         </div>
                     </div>
+
+                    {% if not fabric %}
+                    <h6 class="border-bottom">Starting Lot (optional)</h6>
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Lot No.</label>
+                                {{ form.lot_number }}
+                                <div class="form-text">{{ form.lot_number.help_text }}</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Initial Quantity</label>
+                                {{ form.initial_quantity }}
+                                <div class="form-text">{{ form.initial_quantity.help_text }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
 
                     <div class="mb-3">
                         <label class="form-label">Description</label>
@@ -168,20 +215,4 @@
         </div>
     </div>
 </div>
-
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const codeField = document.getElementById('id_fabric_code');
-        const nameField = document.getElementById('id_fabric_name');
-
-        if (!codeField.value) {
-            nameField.addEventListener('input', function() {
-                const name = this.value.trim().toUpperCase().replace(/\s+/g, '_').substring(0, 20);
-                if (name) {
-                    codeField.value = 'FAB_' + name;
-                }
-            });
-        }
-    });
-</script>
 {% endblock %}

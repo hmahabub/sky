@@ -1,0 +1,107 @@
+{% extends 'base/base.html' %}
+{% load static %}
+
+{% block title %}Add Stock - {{ fabric.fabric_name }} - SkyTex ERP{% endblock %}
+
+{% block page_title %}Add Stock{% endblock %}
+
+{% block content %}
+<style>
+    .compact-form .form-label {
+        margin-bottom: 0.15rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .compact-form .form-control,
+    .compact-form .form-select {
+        padding: 0.3rem 0.5rem;
+        font-size: 0.85rem;
+    }
+    .compact-form textarea.form-control {
+        height: auto;
+        min-height: 60px;
+    }
+    .compact-form .mb-3 {
+        margin-bottom: 0.75rem !important;
+    }
+    .compact-form .btn {
+        padding: 0.3rem 0.75rem;
+        font-size: 0.85rem;
+    }
+    .compact-card {
+        padding: 1rem !important;
+    }
+    .compact-form .alert {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
+        margin-bottom: 0.5rem;
+    }
+</style>
+
+<div class="container-fluid">
+    <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <div class="stat-card compact-card">
+                <div class="mb-3 pb-2 border-bottom">
+                    <div class="fw-bold">{{ fabric.fabric_code }} - {{ fabric.fabric_name }}</div>
+                    <div class="text-muted small">Currently {{ fabric.current_stock|floatformat:2 }} {{ fabric.get_unit_display }} in stock</div>
+                </div>
+
+                <div class="alert alert-info py-2 small">
+                    Every stock-in creates a new, uniquely-numbered lot so this fabric can be traced and issued lot-wise later.
+                </div>
+
+                <form method="post" class="compact-form">
+                    {% csrf_token %}
+
+                    {% if form.errors %}
+                        <div class="alert alert-danger">
+                            <strong>Please fix the following errors:</strong>
+                            <ul class="mb-0 ps-3">
+                                {% for field, errors in form.errors.items %}
+                                    <li>{{ field }}: {{ errors|join:", " }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    {% endif %}
+
+                    <div class="mb-3">
+                        <label class="form-label">Lot No. *</label>
+                        {{ form.lot_number }}
+                        <div class="form-text">{{ form.lot_number.help_text }}</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Quantity *</label>
+                        {{ form.quantity }}
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Location</label>
+                        {{ form.location }}
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Received Date</label>
+                        {{ form.received_date }}
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        {{ form.notes }}
+                    </div>
+
+                    <div class="mt-2 border-top pt-2">
+                        <button type="submit" class="btn btn-gradient">
+                            <i class="fas fa-plus"></i> Add Stock
+                        </button>
+                        <a href="{% url 'inventory:fabric_stock_ledger' fabric.pk %}" class="btn btn-secondary">
+                            <i class="fas fa-times"></i> Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

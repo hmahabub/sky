@@ -52,6 +52,7 @@
                         <th>Dispatch #</th>
                         <th>Style</th>
                         <th>Buyer</th>
+                        <th>PO</th>
                         <th>Date</th>
                         <th>Cartons</th>
                         <th>Quantity</th>
@@ -66,6 +67,7 @@
                         <td><strong>{{ dispatch.dispatch_number }}</strong></td>
                         <td>{{ dispatch.style.style_number }}</td>
                         <td>{{ dispatch.buyer.buyer_name }}</td>
+                        <td>{{ dispatch.purchase_order.po_number|default:"-" }}</td>
                         <td>{{ dispatch.dispatch_date }}</td>
                         <td>{{ dispatch.total_cartons }}</td>
                         <td>{{ dispatch.total_quantity }}</td>
@@ -74,18 +76,27 @@
                             <span class="badge bg-{% if dispatch.status == 'delivered' %}success{% elif dispatch.status == 'shipped' %}info{% elif dispatch.status == 'in_transit' %}warning{% elif dispatch.status == 'dispatched' %}primary{% elif dispatch.status == 'cancelled' %}danger{% else %}secondary{% endif %}">
                                 {{ dispatch.get_status_display }}
                             </span>
+                            {% if dispatch.shipment_approval == 'pending' %}
+                            <span class="badge bg-warning" title="Shipped status awaiting approval">Ship Pending</span>
+                            {% endif %}
+                            {% if dispatch.is_status_locked %}
+                            <i class="fas fa-lock text-muted small" title="Status locked - Shipped was approved"></i>
+                            {% endif %}
                         </td>
                         <td>
                             <div class="btn-group btn-group-sm">
-                                <a href="#" class="btn btn-outline-primary" title="View">
+                                <a href="{% url 'inventory:dispatch_detail' dispatch.pk %}" class="btn btn-outline-primary" title="View">
                                     <i class="fas fa-eye"></i>
+                                </a>
+                                <a href="{% url 'inventory:edit_dispatch' dispatch.pk %}" class="btn btn-outline-warning" title="Edit">
+                                    <i class="fas fa-edit"></i>
                                 </a>
                             </div>
                         </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="9" class="text-center py-4">
+                        <td colspan="10" class="text-center py-4">
                             <i class="fas fa-shipping-fast fa-3x text-muted mb-3 d-block"></i>
                             <p class="text-muted">No dispatches found</p>
                             <a href="{% url 'inventory:add_dispatch' %}" class="btn btn-gradient btn-sm">

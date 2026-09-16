@@ -5,7 +5,7 @@ from .models import (
     TrimReceipt, TrimReceiptDetail,
     ProductionIssue, ProductionIssueDetail, FinishedGoods,
     FinishedGoodsProduction, Dispatch, DispatchDetail, StockMovement,
-    StockAdjustment,
+    StockAdjustment, StockAdjustmentDetail,
 )
 
 admin.site.register(Fabric)
@@ -22,4 +22,13 @@ admin.site.register(FinishedGoodsProduction)
 admin.site.register(Dispatch)
 admin.site.register(DispatchDetail)
 admin.site.register(StockMovement)
-admin.site.register(StockAdjustment)
+
+class StockAdjustmentDetailInline(admin.TabularInline):
+    model = StockAdjustmentDetail
+    extra = 0
+
+@admin.register(StockAdjustment)
+class StockAdjustmentAdmin(admin.ModelAdmin):
+    list_display = ('adjustment_number', 'adjustment_type', 'direction', 'status', 'adjustment_date', 'created_by')
+    list_filter = ('status', 'adjustment_type', 'direction')
+    inlines = [StockAdjustmentDetailInline]

@@ -32,7 +32,7 @@ from apps.inventory.models import (
     Fabric, FabricRoll, Trim, GoodsReceipt, GoodsReceiptDetail,
     TrimReceipt, TrimReceiptDetail, ProductionIssue, ProductionIssueDetail,
     FinishedGoods, FinishedGoodsProduction, Dispatch, DispatchDetail,
-    StockMovement, StockAdjustment,
+    StockMovement, StockAdjustment, StockAdjustmentDetail,
 )
 
 TODAY = date.today()
@@ -541,7 +541,6 @@ class Command(BaseCommand):
                     supplier=random.choice(self.suppliers),
                     unit='meter',
                     unit_price=Decimal(random.randint(150, 650)),
-                    reorder_level=Decimal(200),
                     current_stock=Decimal(stock_buckets[i % len(stock_buckets)]),
                     min_stock=Decimal(50),
                     max_stock=Decimal(2000),
@@ -558,9 +557,10 @@ class Command(BaseCommand):
             for _ in range(random.randint(1, 2)):
                 length = Decimal(random.randint(100, 500))
                 used = Decimal(random.randint(0, int(length) // 2))
+                lot_number = f"LOT-{n:05d}"
                 FabricRoll.objects.create(
-                    roll_number=f"ROLL-{n:05d}", fabric=fabric,
-                    lot_number=f"LOT-{random.randint(1000,9999)}",
+                    roll_number=lot_number, fabric=fabric,
+                    lot_number=lot_number,
                     length=length, used_length=used, remaining_length=length - used,
                     location="Main Warehouse", rack_number=f"R{random.randint(1,20)}",
                     bin_number=f"B{random.randint(1,50)}",
@@ -788,7 +788,7 @@ class Command(BaseCommand):
             'recount': "Physical recount correction",
             'qc_failure': "Failed QC inspection",
         }
-        if StockAdjustment.objects.filter(reason__in=reasons.values()).count() >= 7:
+        if StockAdjustment.objects.filter(reason__in=list(reasons.values()) + [self.PENDING_REASON]).count() >= 8:
             return
         n = 1
         for fabric in random.sample(self.fabrics, 3):
@@ -809,13 +809,19 @@ class Command(BaseCommand):
             self._apply_adjustment(f"SA-2026-{n:04d}", adj_type, direction, qty, reasons[adj_type], finished_goods=fg)
             n += 1
 
+        self._seed_pending_adjustment()
+
+    PENDING_REASON = "Demo: awaiting approval"
+
     def _apply_adjustment(self, number, adj_type, direction, qty, reason, fabric=None, finished_goods=None):
+        """Seeded adjustments are already approved, so demo data reflects a realistic end state."""
         signed = qty if direction == 'increase' else -qty
         adjustment = StockAdjustment.objects.create(
             adjustment_type=adj_type, direction=direction,
             fabric=fabric, finished_goods=finished_goods,
             adjustment_date=rand_date(0, 20), quantity=qty, reason=reason,
-            created_by=self.user,
+            status='approved', created_by=self.user,
+            approved_by=self.user, approved_date=date.today(),
         )
         if fabric:
             Fabric.objects.filter(pk=fabric.pk).update(current_stock=F('current_stock') + signed)
@@ -828,6 +834,33 @@ class Command(BaseCommand):
             reference_id=adjustment.pk, fabric=fabric, finished_goods=finished_goods,
             quantity=signed, notes=reason, created_by=self.user,
         )
+
+    def _seed_pending_adjustment(self):
+        """One lot-wise fabric adjustment left 'pending', so the Pending Approvals page isn't empty out of the box."""
+        candidates = [
+            (fabric, lots) for fabric in self.fabrics
+            if (lots := list(FabricRoll.objects.filter(fabric=fabric, status='in_stock')[:2]))
+        ]
+        if not candidates:
+            return
+        fabric, lots = random.choice(candidates)
+        adjustment = StockAdjustment.objects.create(
+            adjustment_type='issue', direction='decrease', fabric=fabric,
+            adjustment_date=date.today(), quantity=Decimal('0'),
+            reason=self.PENDING_REASON, status='pending', created_by=self.user,
+        )
+        details = []
+        total = Decimal('0')
+        for lot in lots:
+            qty = min(Decimal('5'), lot.remaining_length)
+            if qty <= 0:
+                continue
+            details.append(StockAdjustmentDetail(stock_adjustment=adjustment, fabric_roll=lot, quantity=qty))
+            total += qty
+        if details:
+            StockAdjustmentDetail.objects.bulk_create(details)
+            adjustment.quantity = total
+            adjustment.save(update_fields=['quantity'])
 
     # ------------------------------------------------------------------- misc
 

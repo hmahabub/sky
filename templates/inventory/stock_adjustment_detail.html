@@ -1,0 +1,153 @@
+{% extends 'base/base.html' %}
+{% load static %}
+
+{% block title %}{{ adjustment.adjustment_number }} - SkyTex ERP{% endblock %}
+
+{% block page_title %}Adjustment {{ adjustment.adjustment_number }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="page-header">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h5 class="mb-1">{{ adjustment.adjustment_number }}</h5>
+                <p class="text-muted small mb-0">
+                    {{ adjustment.get_adjustment_type_display }} &middot; {{ adjustment.get_direction_display }}
+                </p>
+            </div>
+            <div>
+                <a href="{% url 'inventory:stock_adjustments' %}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Back to Adjustments
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-md-3">
+            <div class="stat-card text-center">
+                <div class="text-muted small">Status</div>
+                <div class="h4 mb-0">
+                    {% if adjustment.status == 'approved' %}
+                        <span class="badge bg-success">Approved</span>
+                    {% elif adjustment.status == 'rejected' %}
+                        <span class="badge bg-danger">Rejected</span>
+                    {% else %}
+                        <span class="badge bg-warning">Pending</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card text-center">
+                <div class="text-muted small">Quantity</div>
+                <div class="h4 mb-0 {% if adjustment.direction == 'increase' %}text-success{% else %}text-danger{% endif %}">
+                    {% if adjustment.direction == 'increase' %}+{% else %}-{% endif %}{{ adjustment.effective_quantity|floatformat:2 }}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card text-center">
+                <div class="text-muted small">Requested By</div>
+                <div class="h5 mb-0">{{ adjustment.created_by.username|default:"-" }}</div>
+                <div class="text-muted small">{{ adjustment.adjustment_date }}</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card text-center">
+                <div class="text-muted small">{% if adjustment.status == 'rejected' %}Rejected By{% else %}Approved By{% endif %}</div>
+                <div class="h5 mb-0">{{ adjustment.approved_by.username|default:"-" }}</div>
+                <div class="text-muted small">{{ adjustment.approved_date|default:"-" }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="stat-card mb-3">
+        <dl class="row mb-0 small">
+            <dt class="col-sm-2">Item</dt>
+            <dd class="col-sm-10">
+                {% if adjustment.fabric %}
+                    <a href="{% url 'inventory:fabric_stock_ledger' adjustment.fabric_id %}">{{ adjustment.fabric.fabric_code }} - {{ adjustment.fabric.fabric_name }}</a>
+                {% elif adjustment.trim %}
+                    <a href="{% url 'inventory:trim_stock_ledger' adjustment.trim_id %}">{{ adjustment.trim.trim_code }} - {{ adjustment.trim.trim_name }}</a>
+                {% elif adjustment.finished_goods %}
+                    {{ adjustment.finished_goods.sku_code }}
+                {% else %}
+                    -
+                {% endif %}
+            </dd>
+            {% if adjustment.purchase_order %}
+            <dt class="col-sm-2">Purchase Order</dt>
+            <dd class="col-sm-10">{{ adjustment.purchase_order.po_number }}</dd>
+            {% endif %}
+            <dt class="col-sm-2">Reason</dt>
+            <dd class="col-sm-10">{{ adjustment.reason }}</dd>
+            {% if adjustment.notes %}
+            <dt class="col-sm-2">Notes</dt>
+            <dd class="col-sm-10">{{ adjustment.notes }}</dd>
+            {% endif %}
+            {% if adjustment.status == 'rejected' and adjustment.rejection_reason %}
+            <dt class="col-sm-2">Rejection Reason</dt>
+            <dd class="col-sm-10 text-danger">{{ adjustment.rejection_reason }}</dd>
+            {% endif %}
+        </dl>
+    </div>
+
+    {% if adjustment.details.all %}
+    <div class="stat-card mb-3">
+        <h6 class="border-bottom pb-2">Lot Breakdown</h6>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Lot No.</th>
+                        <th>Received</th>
+                        <th>Remaining Before</th>
+                        <th>Quantity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for detail in adjustment.details.all %}
+                    <tr>
+                        <td>{{ detail.fabric_roll.lot_number }}</td>
+                        <td>{{ detail.fabric_roll.received_date }}</td>
+                        <td>{{ detail.fabric_roll.remaining_length|floatformat:2 }}</td>
+                        <td class="{% if adjustment.direction == 'increase' %}text-success{% else %}text-danger{% endif %}">
+                            {% if adjustment.direction == 'increase' %}+{% else %}-{% endif %}{{ detail.quantity|floatformat:2 }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if adjustment.status == 'pending' and request.user.is_superuser %}
+    <div class="stat-card">
+        <h6 class="border-bottom pb-2">Approve or Reject</h6>
+        <div class="d-flex gap-2">
+            <form method="post" action="{% url 'inventory:approve_stock_adjustment' adjustment.pk %}" onsubmit="return confirm('Approve this adjustment? Stock will update immediately.');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-success">
+                    <i class="fas fa-check"></i> Approve
+                </button>
+            </form>
+            <button type="button" class="btn btn-outline-danger" data-bs-toggle="collapse" data-bs-target="#rejectForm">
+                <i class="fas fa-times"></i> Reject
+            </button>
+        </div>
+        <div class="collapse mt-3" id="rejectForm">
+            <form method="post" action="{% url 'inventory:reject_stock_adjustment' adjustment.pk %}">
+                {% csrf_token %}
+                <div class="mb-2">
+                    <label class="form-label">Rejection Reason *</label>
+                    <textarea name="rejection_reason" class="form-control" rows="2" required></textarea>
+                </div>
+                <button type="submit" class="btn btn-danger btn-sm">Confirm Rejection</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

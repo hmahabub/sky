@@ -27,7 +27,8 @@
                     <div class="alert alert-info py-2 small mb-3">
                         <i class="fas fa-info-circle"></i>
                         The adjustment number is generated automatically (format: <code>SA-YYMMDD-00001</code>).
-                        Stock can never be reduced below 0 - if you try, you'll get an error here instead.
+                        This will be <strong>submitted for approval</strong> - stock won't change until an
+                        admin approves it. Stock can never be reduced below 0 either way.
                     </div>
                     
                     <div class="row">
@@ -66,6 +67,12 @@
                         Adjust exactly <strong>one</strong> of the items below.
                     </div>
                     
+                    <div class="alert alert-secondary py-2 small">
+                        For lot-tracked Fabric issues/corrections, use "Adjust / Issue Stock" from the
+                        fabric's own Stock Ledger page instead - it lets you pick which lot(s) to draw from.
+                        This form is for whole-item corrections (Finished Goods, Trim, or a plain Fabric total).
+                    </div>
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
@@ -75,19 +82,13 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Fabric Roll <span class="text-muted">(optional, for tracking only)</span></label>
-                                {{ form.fabric_roll }}
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
                                 <label class="form-label">Trim</label>
                                 {{ form.trim }}
                             </div>
                         </div>
+                    </div>
+
+                    <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label class="form-label">Finished Goods</label>
@@ -108,7 +109,7 @@
                     
                     <div class="mt-4 border-top pt-3">
                         <button type="submit" class="btn btn-gradient">
-                            <i class="fas fa-save"></i> Create Adjustment
+                            <i class="fas fa-paper-plane"></i> Submit for Approval
                         </button>
                         <a href="{% url 'inventory:stock_adjustments' %}" class="btn btn-secondary">
                             <i class="fas fa-times"></i> Cancel

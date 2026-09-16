@@ -42,6 +42,14 @@
         font-size: 0.8rem;
         margin-bottom: 0.5rem;
     }
+    .readonly-code {
+        padding: 0.3rem 0.5rem;
+        font-size: 0.85rem;
+        background: #f1f3f5;
+        border: 1px solid #dee2e6;
+        border-radius: 0.25rem;
+        font-weight: 600;
+    }
 </style>
 
 <div class="container-fluid">
@@ -63,12 +71,14 @@
                     {% endif %}
 
                     <div class="row g-2">
+                        {% if trim %}
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Trim Code *</label>
-                                {{ form.trim_code }}
+                                <label class="form-label">Trim Code</label>
+                                <div class="readonly-code">{{ trim.trim_code }}</div>
                             </div>
                         </div>
+                        {% endif %}
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label class="form-label">Trim Name *</label>
@@ -163,20 +173,4 @@
         </div>
     </div>
 </div>
-
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const codeField = document.getElementById('id_trim_code');
-        const nameField = document.getElementById('id_trim_name');
-
-        if (!codeField.value) {
-            nameField.addEventListener('input', function() {
-                const name = this.value.trim().toUpperCase().replace(/\s+/g, '_').substring(0, 20);
-                if (name) {
-                    codeField.value = 'TRM_' + name;
-                }
-            });
-        }
-    });
-</script>
 {% endblock %}

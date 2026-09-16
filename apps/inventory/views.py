@@ -16,14 +16,15 @@ from .models import (
     TrimReceipt, TrimReceiptDetail,
     ProductionIssue, ProductionIssueDetail, FinishedGoods,
     FinishedGoodsProduction, Dispatch, DispatchDetail,
-    StockMovement, StockAdjustment
+    StockMovement, StockAdjustment, StockAdjustmentDetail
 )
 from .forms import (
-    FabricForm, FabricRollForm, TrimForm, GoodsReceiptForm,
+    FabricForm, FabricRollForm, FabricStockInForm, FabricLotAdjustForm,
+    TrimForm, TrimStockInForm, GoodsReceiptForm,
     GoodsReceiptDetailForm, TrimReceiptForm, TrimReceiptDetailForm,
     ProductionIssueForm, ProductionIssueDetailForm,
     FinishedGoodsForm, FinishedGoodsStockInForm,
-    DispatchForm, DispatchDetailForm, StockAdjustmentForm
+    DispatchForm, DispatchDetailForm, StockAdjustmentForm, RejectStockAdjustmentForm
 )
 
 def is_inventory_or_admin(user):
@@ -53,7 +54,7 @@ def inventory_dashboard(request):
     
     # Low Stock Items
     context['low_fabric_count'] = Fabric.objects.filter(
-        current_stock__lte=100,  # Adjust based on reorder level
+        current_stock__lte=F('min_stock'),
         is_active=True
     ).count()
     
@@ -97,24 +98,23 @@ def fabric_list(request):
     search = request.GET.get('search')
     if search:
         fabrics = fabrics.filter(
-            Q(fabric_code__icontains=search) |
             Q(fabric_name__icontains=search) |
             Q(color__icontains=search)
         )
-    
+
     # Filter by fabric type
     fabric_type = request.GET.get('type')
     if fabric_type:
         fabrics = fabrics.filter(fabric_type=fabric_type)
-    
+
     # Filter by stock status
     stock_status = request.GET.get('stock_status')
     if stock_status == 'low':
-        fabrics = fabrics.filter(current_stock__lte=100)
+        fabrics = fabrics.filter(current_stock__lte=F('min_stock'))
     elif stock_status == 'normal':
-        fabrics = fabrics.filter(current_stock__gt=100, current_stock__lt=1000)
+        fabrics = fabrics.filter(current_stock__gt=F('min_stock'), current_stock__lt=F('max_stock'))
     elif stock_status == 'overstock':
-        fabrics = fabrics.filter(current_stock__gte=1000)
+        fabrics = fabrics.filter(current_stock__gte=F('max_stock'))
     
     # Pagination
     paginator = Paginator(fabrics, 20)
@@ -135,16 +135,44 @@ def fabric_list(request):
 @login_required
 @user_passes_test(is_inventory_or_admin)
 def add_fabric(request):
-    """Add new fabric"""
+    """Add new fabric, optionally with its first stock lot."""
     if request.method == 'POST':
         form = FabricForm(request.POST)
         if form.is_valid():
-            fabric = form.save()
+            with transaction.atomic():
+                fabric = form.save()
+
+                lot_number = form.cleaned_data.get('lot_number')
+                initial_quantity = form.cleaned_data.get('initial_quantity') or Decimal('0')
+                if lot_number:
+                    roll = FabricRoll.objects.create(
+                        roll_number=lot_number,
+                        lot_number=lot_number,
+                        fabric=fabric,
+                        length=initial_quantity,
+                        location='Main Warehouse',
+                        received_date=date.today(),
+                        quality_status='passed',
+                    )
+                    if initial_quantity > 0:
+                        fabric.current_stock = initial_quantity
+                        fabric.save(update_fields=['current_stock'])
+                        StockMovement.objects.create(
+                            movement_type='receipt',
+                            reference_number=f"LOT-{lot_number}",
+                            reference_id=roll.pk,
+                            fabric=fabric,
+                            fabric_roll=roll,
+                            quantity=initial_quantity,
+                            notes=f"Starting lot {lot_number}",
+                            created_by=request.user,
+                        )
+
             messages.success(request, f'Fabric "{fabric.fabric_name}" added successfully!')
             return redirect('inventory:fabric_list')
     else:
         form = FabricForm()
-    
+
     context = {
         'active': 'inventory',
         'page_title': 'Add Fabric',
@@ -175,6 +203,124 @@ def edit_fabric(request, pk):
     return render(request, 'inventory/fabric_form.html', context)
 
 @login_required
+@user_passes_test(is_inventory_or_admin)
+def add_fabric_stock(request, pk):
+    """
+    Add a brand-new lot to an existing fabric. Immediate, no approval
+    needed (same as the old Goods Receipt this replaces) - approval only
+    gates stock going OUT (fabric_stock_adjust), not coming in.
+    """
+    fabric = get_object_or_404(Fabric, pk=pk)
+    if request.method == 'POST':
+        form = FabricStockInForm(request.POST)
+        if form.is_valid():
+            lot_number = form.cleaned_data['lot_number']
+            quantity = form.cleaned_data['quantity']
+            with transaction.atomic():
+                roll = FabricRoll.objects.create(
+                    roll_number=lot_number,
+                    lot_number=lot_number,
+                    fabric=fabric,
+                    length=quantity,
+                    location=form.cleaned_data['location'],
+                    received_date=form.cleaned_data['received_date'],
+                    quality_status='passed',
+                )
+                Fabric.objects.filter(pk=fabric.pk).update(current_stock=F('current_stock') + quantity)
+                StockMovement.objects.create(
+                    movement_type='receipt',
+                    reference_number=f"LOT-{lot_number}",
+                    reference_id=roll.pk,
+                    fabric=fabric,
+                    fabric_roll=roll,
+                    quantity=quantity,
+                    notes=form.cleaned_data['notes'],
+                    created_by=request.user,
+                )
+            messages.success(request, f'Lot "{lot_number}" added - {quantity} {fabric.get_unit_display()} in stock.')
+            return redirect('inventory:fabric_stock_ledger', pk=fabric.pk)
+    else:
+        form = FabricStockInForm()
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Add Stock',
+        'form': form,
+        'fabric': fabric,
+    }
+    return render(request, 'inventory/fabric_stock_in_form.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def fabric_stock_adjust(request, pk):
+    """
+    Lot-wise Adjust/Issue for a fabric: pick one or more in-stock lots and
+    enter a quantity against each. Creates a 'pending' StockAdjustment (+
+    one StockAdjustmentDetail per lot) - no stock actually moves until a
+    superuser approves it (see approve_stock_adjustment).
+    """
+    fabric = get_object_or_404(Fabric, pk=pk)
+    lots = FabricRoll.objects.filter(fabric=fabric, status='in_stock').order_by('received_date')
+
+    if request.method == 'POST':
+        form = FabricLotAdjustForm(request.POST)
+        rows = []
+        row_errors = []
+        for lot in lots:
+            raw = request.POST.get(f'quantity_{lot.pk}')
+            if not raw:
+                continue
+            try:
+                qty = Decimal(raw)
+            except InvalidOperation:
+                row_errors.append(f"Lot {lot.lot_number}: quantity must be a number.")
+                continue
+            if qty <= 0:
+                continue
+            rows.append((lot, qty))
+
+        if form.is_valid():
+            if not rows and not row_errors:
+                row_errors.append("Enter a quantity against at least one lot.")
+
+            if row_errors:
+                for err in row_errors:
+                    messages.error(request, err)
+            else:
+                adjustment = StockAdjustment.objects.create(
+                    adjustment_type=form.cleaned_data['adjustment_type'],
+                    direction=form.cleaned_data['direction'],
+                    fabric=fabric,
+                    purchase_order=form.cleaned_data['purchase_order'],
+                    adjustment_date=form.cleaned_data['adjustment_date'],
+                    quantity=sum((qty for _, qty in rows), Decimal('0')),
+                    reason=form.cleaned_data['reason'],
+                    notes=form.cleaned_data['notes'],
+                    status='pending',
+                    created_by=request.user,
+                )
+                StockAdjustmentDetail.objects.bulk_create([
+                    StockAdjustmentDetail(stock_adjustment=adjustment, fabric_roll=lot, quantity=qty)
+                    for lot, qty in rows
+                ])
+                messages.success(
+                    request,
+                    f'Adjustment "{adjustment.adjustment_number}" submitted for approval across {len(rows)} lot(s).'
+                )
+                return redirect('inventory:fabric_stock_ledger', pk=fabric.pk)
+    else:
+        form = FabricLotAdjustForm()
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Adjust / Issue Stock',
+        'form': form,
+        'fabric': fabric,
+        'lots': lots,
+    }
+    return render(request, 'inventory/fabric_lot_adjust_form.html', context)
+
+@login_required
 def trim_list(request):
     """List all trims"""
     trims = Trim.objects.filter(is_active=True).select_related('supplier')
@@ -183,8 +329,9 @@ def trim_list(request):
     search = request.GET.get('search')
     if search:
         trims = trims.filter(
-            Q(trim_code__icontains=search) |
-            Q(trim_name__icontains=search)
+            Q(trim_name__icontains=search) |
+            Q(color__icontains=search) |
+            Q(size__icontains=search)
         )
     
     # Filter by trim type
@@ -221,6 +368,68 @@ def add_trim(request):
         'form': form,
     }
     return render(request, 'inventory/trim_form.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def edit_trim(request, pk):
+    """Edit trim"""
+    trim = get_object_or_404(Trim, pk=pk)
+    if request.method == 'POST':
+        form = TrimForm(request.POST, instance=trim)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Trim "{trim.trim_name}" updated successfully!')
+            return redirect('inventory:trim_list')
+    else:
+        form = TrimForm(instance=trim)
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Edit Trim',
+        'form': form,
+        'trim': trim,
+    }
+    return render(request, 'inventory/trim_form.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def add_trim_stock(request, pk):
+    """
+    Add stock to an existing trim item. Deliberately simple (no lot
+    tracking - trims aren't batch/dye-lot sensitive the way fabric is).
+    Immediate, no approval needed (same as Add Stock for Fabric/Finished
+    Goods) - approval only gates stock going OUT via Stock Adjustment.
+    """
+    trim = get_object_or_404(Trim, pk=pk)
+    if request.method == 'POST':
+        form = TrimStockInForm(request.POST)
+        if form.is_valid():
+            quantity = form.cleaned_data['quantity']
+            with transaction.atomic():
+                Trim.objects.filter(pk=trim.pk).update(current_stock=F('current_stock') + quantity)
+                movement = StockMovement.objects.create(
+                    movement_type='receipt',
+                    reference_number='',
+                    reference_id=trim.pk,
+                    trim=trim,
+                    quantity=quantity,
+                    notes=form.cleaned_data['notes'],
+                    created_by=request.user,
+                )
+                movement.reference_number = movement.movement_number
+                movement.save(update_fields=['reference_number'])
+            messages.success(request, f'Added {quantity} units to "{trim.trim_name}" stock.')
+            return redirect('inventory:trim_stock_ledger', pk=trim.pk)
+    else:
+        form = TrimStockInForm()
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Add Stock',
+        'form': form,
+        'trim': trim,
+    }
+    return render(request, 'inventory/trim_stock_in_form.html', context)
 
 @login_required
 def goods_receipts(request):
@@ -336,8 +545,9 @@ def add_goods_receipt(request):
 @login_required
 def fabric_stock_ledger(request, pk):
     """
-    All stock-affecting activity (Goods Receipts and Stock Adjustments) for
-    a single fabric, newest first, with a running balance.
+    All stock-affecting activity (lot additions, issues/adjustments) for a
+    single fabric, newest first, with a running balance - plus its current
+    lot breakdown.
     """
     fabric = get_object_or_404(Fabric, pk=pk)
     movements = list(
@@ -355,11 +565,14 @@ def fabric_stock_ledger(request, pk):
 
     movements.reverse()  # newest first for display
 
+    lots = FabricRoll.objects.filter(fabric=fabric).order_by('-received_date')
+
     context = {
         'active': 'inventory',
         'page_title': f'Stock Ledger - {fabric.fabric_name}',
         'fabric': fabric,
         'movements': movements,
+        'lots': lots,
     }
     return render(request, 'inventory/fabric_stock_ledger.html', context)
 
@@ -824,10 +1037,112 @@ def add_dispatch(request):
     return render(request, 'inventory/dispatch_form.html', context)
 
 @login_required
+@user_passes_test(is_inventory_or_admin)
+def edit_dispatch(request, pk):
+    """
+    Edit a dispatch's header fields. Line items aren't editable here (they
+    already moved finished-goods stock when created) and status changes go
+    through update_dispatch_status instead, since 'shipped' needs approval.
+    """
+    dispatch = get_object_or_404(Dispatch, pk=pk)
+    if request.method == 'POST':
+        form = DispatchForm(request.POST, instance=dispatch)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Dispatch "{dispatch.dispatch_number}" updated successfully!')
+            return redirect('inventory:dispatch_detail', pk=dispatch.pk)
+    else:
+        form = DispatchForm(instance=dispatch)
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Edit Dispatch',
+        'form': form,
+        'dispatch': dispatch,
+    }
+    return render(request, 'inventory/dispatch_form.html', context)
+
+@login_required
+def dispatch_detail(request, pk):
+    """Full view of a dispatch: header, line items, and status/shipment approval controls."""
+    dispatch = get_object_or_404(
+        Dispatch.objects.select_related(
+            'style', 'buyer', 'purchase_order', 'created_by',
+            'shipment_requested_by', 'shipment_approved_by',
+        ),
+        pk=pk,
+    )
+    context = {
+        'active': 'inventory',
+        'page_title': f'Dispatch {dispatch.dispatch_number}',
+        'dispatch': dispatch,
+        'items': dispatch.items.select_related('finished_goods'),
+        'statuses': Dispatch.STATUS_CHOICES,
+    }
+    return render(request, 'inventory/dispatch_detail.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def update_dispatch_status(request, pk):
+    """
+    Update a dispatch's status. Setting it to 'Shipped' doesn't apply
+    immediately - it creates a pending request that only a superuser can
+    approve (approve_dispatch_shipment). Every other status applies right
+    away. Once a Shipped request has been approved, the status is locked
+    and this view refuses all further changes.
+    """
+    dispatch = get_object_or_404(Dispatch, pk=pk)
+    if request.method == 'POST':
+        if dispatch.is_status_locked:
+            messages.error(request, "This dispatch was approved as Shipped and its status can no longer be changed.")
+        else:
+            new_status = request.POST.get('status')
+            valid_statuses = dict(Dispatch.STATUS_CHOICES)
+            if new_status not in valid_statuses:
+                messages.error(request, "Invalid status.")
+            elif new_status == 'shipped':
+                dispatch.shipment_approval = 'pending'
+                dispatch.shipment_requested_by = request.user
+                dispatch.save(update_fields=['shipment_approval', 'shipment_requested_by'])
+                messages.success(request, "Marking as Shipped submitted for approval - status will update once an admin approves it.")
+            else:
+                dispatch.status = new_status
+                dispatch.save(update_fields=['status'])
+                messages.success(request, f'Status updated to "{valid_statuses[new_status]}".')
+    return redirect('inventory:dispatch_detail', pk=dispatch.pk)
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def approve_dispatch_shipment(request, pk):
+    """Approve a pending 'Shipped' request - this locks the status permanently."""
+    dispatch = get_object_or_404(Dispatch, pk=pk)
+    if request.method == 'POST' and dispatch.shipment_approval == 'pending':
+        dispatch.status = 'shipped'
+        dispatch.shipment_approval = 'approved'
+        dispatch.shipment_approved_by = request.user
+        dispatch.shipment_approved_date = date.today()
+        dispatch.save(update_fields=['status', 'shipment_approval', 'shipment_approved_by', 'shipment_approved_date'])
+        messages.success(request, f'Dispatch "{dispatch.dispatch_number}" approved as Shipped - status is now locked.')
+    return redirect('inventory:dispatch_detail', pk=dispatch.pk)
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def reject_dispatch_shipment(request, pk):
+    """Reject a pending 'Shipped' request - status stays whatever it was, and can be requested again later."""
+    dispatch = get_object_or_404(Dispatch, pk=pk)
+    if request.method == 'POST' and dispatch.shipment_approval == 'pending':
+        dispatch.shipment_approval = 'rejected'
+        dispatch.shipment_approved_by = request.user
+        dispatch.shipment_approved_date = date.today()
+        dispatch.save(update_fields=['shipment_approval', 'shipment_approved_by', 'shipment_approved_date'])
+        messages.success(request, f'Shipped request for "{dispatch.dispatch_number}" rejected.')
+    return redirect('inventory:dispatch_detail', pk=dispatch.pk)
+
+@login_required
 def stock_adjustments(request):
     """List all stock adjustments"""
-    adjustments = StockAdjustment.objects.select_related('created_by', 'approved_by').all()
-    
+    adjustments = StockAdjustment.objects.select_related('created_by', 'approved_by').prefetch_related('details').all()
+
     context = {
         'active': 'inventory',
         'page_title': 'Stock Adjustments',
@@ -839,69 +1154,26 @@ def stock_adjustments(request):
 @user_passes_test(is_inventory_or_admin)
 def add_stock_adjustment(request):
     """
-    Add a new stock adjustment. This is the only way stock is reduced -
-    Goods Receipts only ever add. Stock can never be adjusted below 0.
+    Request a stock adjustment. This no longer applies immediately - it's
+    created as 'pending' and only actually changes stock once a superuser
+    approves it (see approve_stock_adjustment / _apply_stock_adjustment).
     """
     if request.method == 'POST':
         form = StockAdjustmentForm(request.POST)
         if form.is_valid():
             adjustment = form.save(commit=False)
-            quantity = adjustment.quantity
-            signed_quantity = quantity if adjustment.direction == 'increase' else -quantity
-
-            try:
-                with transaction.atomic():
-                    if adjustment.fabric_id:
-                        # select_for_update locks the row for the duration of
-                        # this transaction, so two adjustments submitted at
-                        # the same moment can't both pass the 0-floor check
-                        # and then both apply, leaving stock negative.
-                        fabric = Fabric.objects.select_for_update().get(pk=adjustment.fabric_id)
-                        if adjustment.direction == 'decrease' and quantity > fabric.current_stock:
-                            raise ValueError(
-                                f"Can't decrease stock by {quantity}: only {fabric.current_stock} in stock."
-                            )
-                        fabric.current_stock += signed_quantity
-                        fabric.save(update_fields=['current_stock'])
-                    elif adjustment.trim_id:
-                        trim = Trim.objects.select_for_update().get(pk=adjustment.trim_id)
-                        if adjustment.direction == 'decrease' and quantity > trim.current_stock:
-                            raise ValueError(
-                                f"Can't decrease stock by {quantity}: only {trim.current_stock} in stock."
-                            )
-                        trim.current_stock += int(signed_quantity)
-                        trim.save(update_fields=['current_stock'])
-                    elif adjustment.finished_goods_id:
-                        fg = FinishedGoods.objects.select_for_update().get(pk=adjustment.finished_goods_id)
-                        if adjustment.direction == 'decrease' and quantity > fg.quantity_in_stock:
-                            raise ValueError(
-                                f"Can't decrease stock by {quantity}: only {fg.quantity_in_stock} in stock."
-                            )
-                        fg.quantity_in_stock += int(signed_quantity)
-                        fg.save(update_fields=['quantity_in_stock'])
-
-                    adjustment.created_by = request.user
-                    adjustment.save()
-
-                    StockMovement.objects.create(
-                        movement_type='adjustment',
-                        reference_number=adjustment.adjustment_number,
-                        reference_id=adjustment.pk,
-                        fabric_id=adjustment.fabric_id,
-                        trim_id=adjustment.trim_id,
-                        finished_goods_id=adjustment.finished_goods_id,
-                        quantity=signed_quantity,
-                        notes=adjustment.reason,
-                        created_by=request.user,
-                    )
-            except ValueError as exc:
-                messages.error(request, str(exc))
-            else:
-                messages.success(request, f'Stock adjustment "{adjustment.adjustment_number}" created - stock updated!')
-                return redirect('inventory:stock_adjustments')
+            adjustment.status = 'pending'
+            adjustment.created_by = request.user
+            adjustment.save()
+            messages.success(
+                request,
+                f'Stock adjustment "{adjustment.adjustment_number}" submitted for approval - '
+                'stock will update once an admin approves it.'
+            )
+            return redirect('inventory:stock_adjustments')
     else:
         form = StockAdjustmentForm()
-    
+
     context = {
         'active': 'inventory',
         'page_title': 'Add Stock Adjustment',
@@ -912,54 +1184,334 @@ def add_stock_adjustment(request):
     }
     return render(request, 'inventory/stock_adjustment_form.html', context)
 
+def _apply_stock_adjustment(adjustment):
+    """
+    Apply an approved StockAdjustment's stock effects. Must be called
+    inside a transaction.atomic() block by the caller. Raises ValueError
+    (caller should catch it) if there isn't enough stock/lot quantity to
+    carry out a decrease.
+
+    Two shapes:
+    - Lot-wise (has StockAdjustmentDetail rows, Fabric only): moves each
+      named lot's used_length and the parent Fabric's current_stock.
+    - Single-target (no detail rows - Finished Goods, Trim, or a plain
+      non-lot Fabric correction): moves the one fabric/trim/finished_goods
+      target by adjustment.quantity. This is the original add_stock_adjustment
+      logic, just relocated so it can be reused from the approval view.
+    """
+    details = list(adjustment.details.select_related('fabric_roll').all())
+
+    if details:
+        fabric = Fabric.objects.select_for_update().get(pk=adjustment.fabric_id)
+        total_qty = sum((d.quantity for d in details), Decimal('0'))
+        if adjustment.direction == 'decrease' and total_qty > fabric.current_stock:
+            raise ValueError(
+                f"Can't decrease stock by {total_qty}: only {fabric.current_stock} in stock."
+            )
+        for detail in details:
+            roll = FabricRoll.objects.select_for_update().get(pk=detail.fabric_roll_id)
+            if adjustment.direction == 'decrease':
+                if detail.quantity > roll.remaining_length:
+                    raise ValueError(
+                        f"Can't take {detail.quantity} from lot {roll.lot_number}: "
+                        f"only {roll.remaining_length} remaining."
+                    )
+                roll.used_length += detail.quantity
+            else:
+                if detail.quantity > roll.used_length:
+                    raise ValueError(
+                        f"Can't increase lot {roll.lot_number} by {detail.quantity}: "
+                        f"only {roll.used_length} previously issued from it."
+                    )
+                roll.used_length -= detail.quantity
+            roll.save()
+
+        signed_total = total_qty if adjustment.direction == 'increase' else -total_qty
+        fabric.current_stock += signed_total
+        fabric.save(update_fields=['current_stock'])
+
+        StockMovement.objects.create(
+            movement_type='issue' if adjustment.adjustment_type == 'issue' else 'adjustment',
+            reference_number=adjustment.adjustment_number,
+            reference_id=adjustment.pk,
+            fabric=fabric,
+            quantity=signed_total,
+            notes=adjustment.reason,
+            created_by=adjustment.approved_by,
+        )
+    else:
+        quantity = adjustment.quantity
+        signed_quantity = quantity if adjustment.direction == 'increase' else -quantity
+
+        if adjustment.fabric_id:
+            fabric = Fabric.objects.select_for_update().get(pk=adjustment.fabric_id)
+            if adjustment.direction == 'decrease' and quantity > fabric.current_stock:
+                raise ValueError(f"Can't decrease stock by {quantity}: only {fabric.current_stock} in stock.")
+            fabric.current_stock += signed_quantity
+            fabric.save(update_fields=['current_stock'])
+        elif adjustment.trim_id:
+            trim = Trim.objects.select_for_update().get(pk=adjustment.trim_id)
+            if adjustment.direction == 'decrease' and quantity > trim.current_stock:
+                raise ValueError(f"Can't decrease stock by {quantity}: only {trim.current_stock} in stock.")
+            trim.current_stock += int(signed_quantity)
+            trim.save(update_fields=['current_stock'])
+        elif adjustment.finished_goods_id:
+            fg = FinishedGoods.objects.select_for_update().get(pk=adjustment.finished_goods_id)
+            if adjustment.direction == 'decrease' and quantity > fg.quantity_in_stock:
+                raise ValueError(f"Can't decrease stock by {quantity}: only {fg.quantity_in_stock} in stock.")
+            fg.quantity_in_stock += int(signed_quantity)
+            fg.save(update_fields=['quantity_in_stock'])
+
+        StockMovement.objects.create(
+            movement_type='adjustment',
+            reference_number=adjustment.adjustment_number,
+            reference_id=adjustment.pk,
+            fabric_id=adjustment.fabric_id,
+            trim_id=adjustment.trim_id,
+            finished_goods_id=adjustment.finished_goods_id,
+            quantity=signed_quantity,
+            notes=adjustment.reason,
+            created_by=adjustment.approved_by,
+        )
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def pending_adjustments(request):
+    """Stock adjustments and dispatch shipments awaiting approval - superuser only."""
+    adjustments = StockAdjustment.objects.filter(status='pending').select_related(
+        'fabric', 'trim', 'finished_goods', 'created_by'
+    ).prefetch_related('details__fabric_roll')
+
+    dispatch_shipments = Dispatch.objects.filter(shipment_approval='pending').select_related(
+        'buyer', 'style', 'shipment_requested_by'
+    )
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Pending Approvals',
+        'adjustments': adjustments,
+        'dispatch_shipments': dispatch_shipments,
+    }
+    return render(request, 'inventory/pending_adjustments.html', context)
+
+@login_required
+def stock_adjustment_detail(request, pk):
+    """Review page for a single stock adjustment, including its lot breakdown if any."""
+    adjustment = get_object_or_404(
+        StockAdjustment.objects.select_related(
+            'fabric', 'trim', 'finished_goods', 'purchase_order', 'created_by', 'approved_by'
+        ).prefetch_related('details__fabric_roll'),
+        pk=pk,
+    )
+    context = {
+        'active': 'inventory',
+        'page_title': f'Adjustment {adjustment.adjustment_number}',
+        'adjustment': adjustment,
+    }
+    return render(request, 'inventory/stock_adjustment_detail.html', context)
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def approve_stock_adjustment(request, pk):
+    """Approve a pending adjustment - this is the only place stock actually changes."""
+    adjustment = get_object_or_404(StockAdjustment, pk=pk)
+    if request.method == 'POST' and adjustment.status == 'pending':
+        try:
+            with transaction.atomic():
+                adjustment.approved_by = request.user
+                adjustment.approved_date = date.today()
+                _apply_stock_adjustment(adjustment)
+                adjustment.status = 'approved'
+                adjustment.save(update_fields=['status', 'approved_by', 'approved_date'])
+        except ValueError as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, f'Adjustment "{adjustment.adjustment_number}" approved - stock updated.')
+    return redirect('inventory:pending_adjustments')
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def reject_stock_adjustment(request, pk):
+    """Reject a pending adjustment - no stock change."""
+    adjustment = get_object_or_404(StockAdjustment, pk=pk)
+    if request.method == 'POST' and adjustment.status == 'pending':
+        form = RejectStockAdjustmentForm(request.POST)
+        if form.is_valid():
+            adjustment.status = 'rejected'
+            adjustment.rejection_reason = form.cleaned_data['rejection_reason']
+            adjustment.approved_by = request.user
+            adjustment.approved_date = date.today()
+            adjustment.save(update_fields=['status', 'rejection_reason', 'approved_by', 'approved_date'])
+            messages.success(request, f'Adjustment "{adjustment.adjustment_number}" rejected.')
+        else:
+            messages.error(request, "A rejection reason is required.")
+    return redirect('inventory:pending_adjustments')
+
+TOP_N = 10
+
+def _fabric_report_rows(queryset):
+    return [{
+        'code': fabric.fabric_code,
+        'name': fabric.fabric_name,
+        'color': fabric.color,
+        'stock': fabric.current_stock,
+        'min_stock': fabric.min_stock,
+        'status': fabric.stock_status,
+    } for fabric in queryset]
+
+def _trim_report_rows(queryset):
+    return [{
+        'code': trim.trim_code,
+        'name': trim.trim_name,
+        'stock': trim.current_stock,
+        'reorder_level': trim.reorder_level,
+        'status': trim.stock_status,
+    } for trim in queryset]
+
+def _finished_goods_report_rows(queryset):
+    return [{
+        'sku': fg.sku_code,
+        'size': fg.size,
+        'color': fg.color,
+        'in_stock': fg.quantity_in_stock,
+        'dispatched': fg.quantity_dispatched,
+        'status': 'low' if fg.is_low_stock else 'normal',
+    } for fg in queryset]
+
 @login_required
 def stock_report(request):
-    """Generate stock report"""
+    """
+    Stock report overview - top 10 most recently updated items per
+    category, with a 'View All' link to the full paginated/searchable
+    list page and PDF/Excel export of the complete data.
+    """
+    fabrics = Fabric.objects.filter(is_active=True)
+    trims = Trim.objects.filter(is_active=True)
+    finished = FinishedGoods.objects.filter(is_active=True)
+
     context = {
         'active': 'inventory',
         'page_title': 'Stock Report',
+        'fabric_data': _fabric_report_rows(fabrics.order_by('-updated_at')[:TOP_N]),
+        'trim_data': _trim_report_rows(trims.order_by('-updated_at')[:TOP_N]),
+        'finished_data': _finished_goods_report_rows(finished.order_by('-updated_at')[:TOP_N]),
+        'fabric_total': fabrics.count(),
+        'trim_total': trims.count(),
+        'finished_total': finished.count(),
+        'top_n': TOP_N,
     }
-    
-    # Fabric Stock Report
-    fabrics = Fabric.objects.filter(is_active=True)
-    fabric_data = []
-    for fabric in fabrics:
-        fabric_data.append({
-            'code': fabric.fabric_code,
-            'name': fabric.fabric_name,
-            'color': fabric.color,
-            'stock': fabric.current_stock,
-            'reorder_level': fabric.reorder_level,
-            'status': fabric.stock_status,
-        })
-    context['fabric_data'] = fabric_data
-    
-    # Trim Stock Report
-    trims = Trim.objects.filter(is_active=True)
-    trim_data = []
-    for trim in trims:
-        trim_data.append({
-            'code': trim.trim_code,
-            'name': trim.trim_name,
-            'stock': trim.current_stock,
-            'reorder_level': trim.reorder_level,
-            'status': trim.stock_status,
-        })
-    context['trim_data'] = trim_data
-    
-    # Finished Goods Report
-    finished = FinishedGoods.objects.filter(is_active=True)
-    finished_data = []
-    for fg in finished:
-        finished_data.append({
-            'sku': fg.sku_code,
-            'size': fg.size,
-            'color': fg.color,
-            'in_stock': fg.quantity_in_stock,
-            'dispatched': fg.quantity_dispatched,
-            'reorder_level': fg.reorder_level,
-            'status': 'Low' if fg.is_low_stock else 'Normal',
-        })
-    context['finished_data'] = finished_data
-    
     return render(request, 'inventory/stock_report.html', context)
+
+@login_required
+def stock_report_export_excel(request):
+    """Full (untruncated) stock report as a 3-sheet Excel workbook."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    wb = Workbook()
+    header_font = Font(bold=True, color='FFFFFF')
+    header_fill = PatternFill('solid', start_color='4472C4')
+    header_align = Alignment(horizontal='center')
+
+    def write_sheet(ws, headers, rows):
+        for col, title in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col, value=title)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+        for row_idx, row in enumerate(rows, start=2):
+            for col_idx, value in enumerate(row, start=1):
+                ws.cell(row=row_idx, column=col_idx, value=value)
+        for col in range(1, len(headers) + 1):
+            ws.column_dimensions[chr(64 + col)].width = 18
+
+    ws_fabric = wb.active
+    ws_fabric.title = 'Fabrics'
+    write_sheet(
+        ws_fabric,
+        ['Code', 'Name', 'Color', 'Stock', 'Min Stock', 'Status'],
+        [(f.fabric_code, f.fabric_name, f.color, float(f.current_stock), float(f.min_stock), f.stock_status)
+         for f in Fabric.objects.filter(is_active=True)],
+    )
+
+    ws_trim = wb.create_sheet('Trims')
+    write_sheet(
+        ws_trim,
+        ['Code', 'Name', 'Stock', 'Reorder Level', 'Status'],
+        [(t.trim_code, t.trim_name, t.current_stock, t.reorder_level, t.stock_status)
+         for t in Trim.objects.filter(is_active=True)],
+    )
+
+    ws_fg = wb.create_sheet('Finished Goods')
+    write_sheet(
+        ws_fg,
+        ['SKU', 'Size', 'Color', 'In Stock', 'Dispatched', 'Status'],
+        [(fg.sku_code, fg.size, fg.color, fg.quantity_in_stock, fg.quantity_dispatched,
+          'Low' if fg.is_low_stock else 'Normal')
+         for fg in FinishedGoods.objects.filter(is_active=True)],
+    )
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    response['Content-Disposition'] = f'attachment; filename="stock_report_{date.today():%Y%m%d}.xlsx"'
+    wb.save(response)
+    return response
+
+@login_required
+def stock_report_export_pdf(request):
+    """Full (untruncated) stock report as a landscape PDF, one table per category."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    response = HttpResponse(content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="stock_report_{date.today():%Y%m%d}.pdf"'
+
+    doc = SimpleDocTemplate(response, pagesize=landscape(A4),
+                             leftMargin=1.5 * cm, rightMargin=1.5 * cm, topMargin=1.5 * cm, bottomMargin=1.5 * cm)
+    styles = getSampleStyleSheet()
+    elements = [Paragraph('Stock Report', styles['Title']), Spacer(1, 0.5 * cm)]
+
+    table_style = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4472C4')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F2F2F2')]),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ])
+
+    def add_section(title, headers, rows):
+        elements.append(Paragraph(title, styles['Heading2']))
+        data = [headers] + [[str(v) for v in row] for row in rows]
+        table = Table(data, repeatRows=1)
+        table.setStyle(table_style)
+        elements.append(table)
+        elements.append(Spacer(1, 0.7 * cm))
+
+    add_section(
+        'Fabrics',
+        ['Code', 'Name', 'Color', 'Stock', 'Min Stock', 'Status'],
+        [(f.fabric_code, f.fabric_name, f.color, f.current_stock, f.min_stock, f.stock_status)
+         for f in Fabric.objects.filter(is_active=True)],
+    )
+    add_section(
+        'Trims',
+        ['Code', 'Name', 'Stock', 'Reorder Level', 'Status'],
+        [(t.trim_code, t.trim_name, t.current_stock, t.reorder_level, t.stock_status)
+         for t in Trim.objects.filter(is_active=True)],
+    )
+    add_section(
+        'Finished Goods',
+        ['SKU', 'Size', 'Color', 'In Stock', 'Dispatched', 'Status'],
+        [(fg.sku_code, fg.size, fg.color, fg.quantity_in_stock, fg.quantity_dispatched,
+          'Low' if fg.is_low_stock else 'Normal')
+         for fg in FinishedGoods.objects.filter(is_active=True)],
+    )
+
+    doc.build(elements)
+    return response

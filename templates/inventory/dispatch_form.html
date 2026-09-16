@@ -1,9 +1,9 @@
 {% extends 'base/base.html' %}
 {% load static %}
 
-{% block title %}Create Dispatch - SkyTex ERP{% endblock %}
+{% block title %}{% if dispatch %}Edit{% else %}Create{% endif %} Dispatch - SkyTex ERP{% endblock %}
 
-{% block page_title %}Create Dispatch{% endblock %}
+{% block page_title %}{% if dispatch %}Edit{% else %}Create{% endif %} Dispatch{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
@@ -44,15 +44,21 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="row">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Purchase Order</label>
+                                {{ form.purchase_order }}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
                             <div class="mb-3">
                                 <label class="form-label">Dispatch Date *</label>
                                 {{ form.dispatch_date }}
                             </div>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <div class="mb-3">
                                 <label class="form-label">Total Cartons *</label>
                                 {{ form.total_cartons }}
@@ -128,8 +134,9 @@
                         </div>
                     </div>
                     
+                    {% if not dispatch %}
                     <h6 class="border-bottom pb-2 mb-3">Dispatch Items</h6>
-                    
+
                     <div class="table-responsive">
                         <table class="table table-bordered" id="itemsTable">
                             <thead>
@@ -169,17 +176,23 @@
                             </tbody>
                         </table>
                     </div>
-                    
+                    {% else %}
+                    <div class="alert alert-info py-2 small">
+                        Line items aren't editable here since they already moved finished-goods stock -
+                        see the dispatch's detail page for its item list.
+                    </div>
+                    {% endif %}
+
                     <div class="mb-3">
                         <label class="form-label">Notes</label>
                         {{ form.notes }}
                     </div>
-                    
+
                     <div class="mt-4 border-top pt-3">
                         <button type="submit" class="btn btn-gradient">
-                            <i class="fas fa-save"></i> Create Dispatch
+                            <i class="fas fa-save"></i> {% if dispatch %}Update{% else %}Create{% endif %} Dispatch
                         </button>
-                        <a href="{% url 'inventory:dispatches' %}" class="btn btn-secondary">
+                        <a href="{% if dispatch %}{% url 'inventory:dispatch_detail' dispatch.pk %}{% else %}{% url 'inventory:dispatches' %}{% endif %}" class="btn btn-secondary">
                             <i class="fas fa-times"></i> Cancel
                         </a>
                     </div>

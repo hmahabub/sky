@@ -412,24 +412,6 @@
                     </a>
 
                     <a class="d-block py-2 text-white text-decoration-none"
-                       href="{% url 'inventory:goods_receipts' %}">
-                        <i class="fas fa-truck-loading me-2"></i> Fabric Receipts
-                    </a>
-
-
-                    <a class="d-block py-2 text-white text-decoration-none"
-                       href="{% url 'inventory:trim_receipts' %}">
-                        <i class="fas fa-truck-loading me-2"></i> Trim Receipts
-                    </a>
-
-
-                    <a class="d-block py-2 text-white text-decoration-none"
-                       href="{% url 'inventory:production_issues' %}">
-                        <i class="fas fa-industry me-2"></i> Production Issues
-                    </a>
-
-
-                    <a class="d-block py-2 text-white text-decoration-none"
                        href="{% url 'inventory:finished_goods_list' %}">
                         <i class="fas fa-check-circle me-2"></i> Finished Goods
                     </a>
@@ -445,6 +427,13 @@
                        href="{% url 'inventory:stock_adjustments' %}">
                         <i class="fas fa-balance-scale me-2"></i> Stock Adjustments
                     </a>
+
+                    {% if user.is_superuser %}
+                    <a class="d-block py-2 text-white text-decoration-none"
+                       href="{% url 'inventory:pending_adjustments' %}">
+                        <i class="fas fa-clock me-2"></i> Pending Approvals
+                    </a>
+                    {% endif %}
 
                     <a class="d-block py-2 text-white text-decoration-none"
                        href="{% url 'inventory:stock_report' %}">

@@ -91,10 +91,13 @@
                         </td>
                         <td>
                             <div class="btn-group btn-group-sm">
+                                <a href="{% url 'inventory:add_trim_stock' trim.pk %}" class="btn btn-outline-success" title="Add Stock">
+                                    <i class="fas fa-plus"></i>
+                                </a>
                                 <a href="{% url 'inventory:trim_stock_ledger' trim.pk %}" class="btn btn-outline-primary" title="Stock History">
                                     <i class="fas fa-history"></i>
                                 </a>
-                                <a href="#" class="btn btn-outline-warning" title="Edit">
+                                <a href="{% url 'inventory:edit_trim' trim.pk %}" class="btn btn-outline-warning" title="Edit">
                                     <i class="fas fa-edit"></i>
                                 </a>
                             </div>

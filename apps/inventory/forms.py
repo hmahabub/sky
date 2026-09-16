@@ -4,16 +4,28 @@ from .models import (
     TrimReceipt, TrimReceiptDetail,
     ProductionIssue, ProductionIssueDetail, FinishedGoods,
     FinishedGoodsProduction, Dispatch, DispatchDetail,
-    StockMovement, StockAdjustment
+    StockMovement, StockAdjustment, StockAdjustmentDetail
 )
 from datetime import date
+from decimal import Decimal
 
 class FabricForm(forms.ModelForm):
+    lot_number = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={'class': 'form-control'}),
+        help_text="Optional - creates the fabric's first stock lot. Must be unique.",
+    )
+    initial_quantity = forms.DecimalField(
+        required=False, min_value=0, initial=0,
+        widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+        help_text="Starting quantity for the lot above (if given).",
+    )
+
     class Meta:
         model = Fabric
         fields = ['fabric_name', 'fabric_type', 'color', 'gsm',
-                 'width', 'supplier', 'unit', 'unit_price', 'reorder_level',
-                 'min_stock', 'max_stock', 'description']
+                 'width', 'supplier', 'style', 'purchase_order', 'buyer',
+                 'unit', 'unit_price', 'min_stock', 'max_stock', 'description']
         widgets = {
             'fabric_name': forms.TextInput(attrs={'class': 'form-control'}),
             'fabric_type': forms.Select(attrs={'class': 'form-select'}),
@@ -21,13 +33,21 @@ class FabricForm(forms.ModelForm):
             'gsm': forms.NumberInput(attrs={'class': 'form-control'}),
             'width': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
             'supplier': forms.Select(attrs={'class': 'form-select'}),
+            'style': forms.Select(attrs={'class': 'form-select'}),
+            'purchase_order': forms.Select(attrs={'class': 'form-select'}),
+            'buyer': forms.Select(attrs={'class': 'form-select'}),
             'unit': forms.Select(attrs={'class': 'form-select'}),
             'unit_price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-            'reorder_level': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
             'min_stock': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
             'max_stock': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
             'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
+
+    def clean_lot_number(self):
+        lot_number = self.cleaned_data.get('lot_number', '').strip()
+        if lot_number and FabricRoll.objects.filter(lot_number=lot_number).exists():
+            raise forms.ValidationError("A lot with this number already exists.")
+        return lot_number
 
 class FabricRollForm(forms.ModelForm):
     class Meta:
@@ -182,7 +202,7 @@ class FinishedGoodsStockInForm(forms.Form):
 class DispatchForm(forms.ModelForm):
     class Meta:
         model = Dispatch
-        fields = ['dispatch_number', 'style', 'buyer', 'dispatch_date',
+        fields = ['dispatch_number', 'style', 'buyer', 'purchase_order', 'dispatch_date',
                  'total_cartons', 'shipping_line', 'vessel_name', 'vessel_number',
                  'container_number', 'container_size', 'bl_number', 'bl_date',
                  'ex_factory_date', 'shipping_agent', 'notes']
@@ -190,6 +210,7 @@ class DispatchForm(forms.ModelForm):
             'dispatch_number': forms.TextInput(attrs={'class': 'form-control'}),
             'style': forms.Select(attrs={'class': 'form-select'}),
             'buyer': forms.Select(attrs={'class': 'form-select'}),
+            'purchase_order': forms.Select(attrs={'class': 'form-select'}),
             'dispatch_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'total_cartons': forms.NumberInput(attrs={'class': 'form-control'}),
             'shipping_line': forms.TextInput(attrs={'class': 'form-control'}),
@@ -222,14 +243,17 @@ class StockAdjustmentForm(forms.ModelForm):
     class Meta:
         model = StockAdjustment
         # adjustment_number is auto-generated (see StockAdjustment.adjustment_number).
-        fields = ['adjustment_type', 'direction', 'fabric', 'fabric_roll',
+        # fabric_roll is intentionally excluded here - lot-wise fabric
+        # adjustments go through fabric_stock_adjust/StockAdjustmentDetail
+        # instead, so this generic form only ever targets a whole
+        # fabric/trim/finished-goods item (no lot granularity).
+        fields = ['adjustment_type', 'direction', 'fabric',
                  'trim', 'finished_goods', 'adjustment_date', 'quantity',
                  'reason', 'notes']
         widgets = {
             'adjustment_type': forms.Select(attrs={'class': 'form-select'}),
             'direction': forms.Select(attrs={'class': 'form-select'}),
             'fabric': forms.Select(attrs={'class': 'form-select'}),
-            'fabric_roll': forms.Select(attrs={'class': 'form-select'}),
             'trim': forms.Select(attrs={'class': 'form-select'}),
             'finished_goods': forms.Select(attrs={'class': 'form-select'}),
             'adjustment_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
@@ -264,3 +288,85 @@ class StockAdjustmentForm(forms.ModelForm):
                 )
 
         return cleaned_data
+
+class RejectStockAdjustmentForm(forms.Form):
+    rejection_reason = forms.CharField(
+        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        help_text="Why this adjustment is being rejected.",
+    )
+
+class TrimStockInForm(forms.Form):
+    """
+    Adds stock to an existing trim item. Deliberately simple (no lot
+    tracking - trims aren't batch/dye-lot sensitive the way fabric is),
+    mirrors FinishedGoodsStockInForm.
+    """
+    quantity = forms.IntegerField(
+        min_value=1,
+        widget=forms.NumberInput(attrs={'class': 'form-control'}),
+        help_text="How many units to add to stock.",
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        help_text="Optional - e.g. supplier/invoice reference.",
+    )
+
+class FabricStockInForm(forms.Form):
+    """
+    Adds a brand-new lot to an existing fabric. Every stock-in for Fabric is
+    a new, uniquely-numbered lot (unlike Trim/FinishedGoods stock-in, which
+    just bumps a plain quantity) so the item can be traced/issued lot-wise.
+    """
+    lot_number = forms.CharField(
+        widget=forms.TextInput(attrs={'class': 'form-control'}),
+        help_text="Must be unique across all fabric lots.",
+    )
+    quantity = forms.DecimalField(
+        min_value=Decimal('0.01'),
+        widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+    )
+    location = forms.CharField(
+        initial='Main Warehouse',
+        widget=forms.TextInput(attrs={'class': 'form-control'}),
+    )
+    received_date = forms.DateField(
+        initial=date.today,
+        widget=forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+    )
+
+    def clean_lot_number(self):
+        lot_number = self.cleaned_data['lot_number'].strip()
+        if FabricRoll.objects.filter(lot_number=lot_number).exists():
+            raise forms.ValidationError("A lot with this number already exists.")
+        return lot_number
+
+class FabricLotAdjustForm(forms.Form):
+    """
+    Header for a lot-wise Fabric Adjust/Issue action - the per-lot quantity
+    rows are parsed from the POST data directly in the view, the same way
+    add_goods_receipt already parses its multi-row fabric_ids[]/quantities[].
+    """
+    adjustment_type = forms.ChoiceField(choices=StockAdjustment.ADJUSTMENT_TYPES,
+        widget=forms.Select(attrs={'class': 'form-select'}))
+    direction = forms.ChoiceField(choices=StockAdjustment.DIRECTION_CHOICES, initial='decrease',
+        widget=forms.Select(attrs={'class': 'form-select'}))
+    purchase_order = forms.ModelChoiceField(
+        queryset=None, required=False,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        help_text="Optional - which PO this fabric is being issued against.",
+    )
+    adjustment_date = forms.DateField(
+        initial=date.today,
+        widget=forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}))
+    reason = forms.CharField(widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}))
+    notes = forms.CharField(required=False, widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from apps.accounts.models import PurchaseOrder
+        self.fields['purchase_order'].queryset = PurchaseOrder.objects.all()

@@ -7,6 +7,11 @@ from datetime import date, timedelta
 class Fabric(models.Model):
     """Fabric master data"""
     FABRIC_TYPES = [
+        ('shell', 'Shell'),
+        ('lining', 'Lining'),
+        ('interlining', 'Interlining'),
+        ('inner-lining', 'Inner-lining'),
+        ('pocket', 'Pocket'),
         ('cotton', 'Cotton'),
         ('polyester', 'Polyester'),
         ('denim', 'Denim'),
@@ -30,9 +35,11 @@ class Fabric(models.Model):
     gsm = models.IntegerField(help_text="Grams per square meter")
     width = models.DecimalField(max_digits=10, decimal_places=2, help_text="Width in inches")
     supplier = models.ForeignKey('accounts.Supplier', on_delete=models.SET_NULL, null=True, related_name='fabrics')
+    style = models.ForeignKey('accounts.Style', on_delete=models.SET_NULL, null=True, blank=True, related_name='fabrics')
+    purchase_order = models.ForeignKey('accounts.PurchaseOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='fabrics')
+    buyer = models.ForeignKey('accounts.Buyer', on_delete=models.SET_NULL, null=True, blank=True, related_name='fabrics')
     unit = models.CharField(max_length=20, choices=UNIT_CHOICES, default='meter')
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
-    reorder_level = models.DecimalField(max_digits=10, decimal_places=2, default=1000)
     current_stock = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     min_stock = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     max_stock = models.DecimalField(max_digits=10, decimal_places=2, default=99999)
@@ -44,23 +51,23 @@ class Fabric(models.Model):
     @property
     def fabric_code(self):
         return f"F-{self.pk:05d}"
-    
+
     def __str__(self):
         return f"{self.fabric_code} - {self.fabric_name}"
 
-    
+
     @property
     def is_low_stock(self):
-        return self.current_stock <= self.reorder_level
-    
+        return self.current_stock <= self.min_stock
+
     @property
     def stock_status(self):
-        if self.current_stock <= self.reorder_level:
-            return 'Low'
+        if self.current_stock <= self.min_stock:
+            return 'low'
         elif self.current_stock >= self.max_stock:
-            return 'Overstock'
+            return 'overstock'
         else:
-            return 'Normal'
+            return 'normal'
 
 class FabricRoll(models.Model):
     """Individual fabric rolls with tracking"""
@@ -74,7 +81,7 @@ class FabricRoll(models.Model):
     
     roll_number = models.CharField(max_length=50, unique=True)
     fabric = models.ForeignKey(Fabric, on_delete=models.CASCADE, related_name='rolls')
-    lot_number = models.CharField(max_length=50)
+    lot_number = models.CharField(max_length=50, unique=True)
     length = models.DecimalField(max_digits=10, decimal_places=2)
     used_length = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     remaining_length = models.DecimalField(max_digits=10, decimal_places=2)
@@ -98,8 +105,12 @@ class FabricRoll(models.Model):
         self.remaining_length = self.length - self.used_length
         if self.remaining_length <= 0:
             self.status = 'finished'
+        elif self.status == 'finished' and self.remaining_length > 0:
+            # A correction (e.g. an "increase" adjustment reducing used_length)
+            # brought this lot back above zero - it's usable again.
+            self.status = 'in_stock'
         super().save(*args, **kwargs)
-    
+
     def __str__(self):
         return f"{self.roll_number} - {self.fabric.fabric_name} ({self.remaining_length} {self.fabric.unit})"
     
@@ -157,12 +168,12 @@ class Trim(models.Model):
     @property
     def stock_status(self):
         if self.current_stock <= self.reorder_level:
-            return 'Low'
+            return 'low'
         elif self.current_stock >= self.max_stock:
-            return 'Overstock'
+            return 'overstock'
         else:
-            return 'Normal'
-    
+            return 'normal'
+
 
 class GoodsReceipt(models.Model):
     """
@@ -396,12 +407,32 @@ class FinishedGoodsProduction(models.Model):
 
 class Dispatch(models.Model):
     """Dispatch finished goods to buyers"""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('dispatched', 'Dispatched'),
+        ('shipped', 'Shipped'),
+        ('in_transit', 'In Transit'),
+        ('delivered', 'Delivered'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    SHIPMENT_APPROVAL_CHOICES = [
+        ('none', 'Not Requested'),
+        ('pending', 'Pending Approval'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
     dispatch_number = models.CharField(max_length=50, unique=True)
     style = models.ForeignKey('accounts.Style', on_delete=models.CASCADE, related_name='dispatches')
     buyer = models.ForeignKey('accounts.Buyer', on_delete=models.CASCADE, related_name='dispatches')
+    purchase_order = models.ForeignKey('accounts.PurchaseOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='dispatches')
     dispatch_date = models.DateField()
     total_cartons = models.IntegerField()
-    total_quantity = models.IntegerField()
+    # Computed from line items after they're added (see add_dispatch), so it
+    # isn't known at the header's initial save() - needs a default like
+    # GoodsReceipt/TrimReceipt.total_quantity, not left NOT NULL with none.
+    total_quantity = models.IntegerField(default=0)
     shipping_line = models.CharField(max_length=200)
     vessel_name = models.CharField(max_length=200, blank=True)
     vessel_number = models.CharField(max_length=100, blank=True)
@@ -411,22 +442,28 @@ class Dispatch(models.Model):
     bl_date = models.DateField(null=True, blank=True)
     ex_factory_date = models.DateField(null=True, blank=True)
     shipping_agent = models.CharField(max_length=200, blank=True)
-    status = models.CharField(max_length=20, choices=[
-        ('pending', 'Pending'),
-        ('dispatched', 'Dispatched'),
-        ('shipped', 'Shipped'),
-        ('in_transit', 'In Transit'),
-        ('delivered', 'Delivered'),
-        ('cancelled', 'Cancelled'),
-    ], default='pending')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    # Marking a dispatch 'Shipped' needs admin approval and, once approved,
+    # the status is permanently locked (see is_status_locked) - these fields
+    # track that request independently of `status` itself, which is only
+    # ever set to 'shipped' at the moment of approval.
+    shipment_approval = models.CharField(max_length=20, choices=SHIPMENT_APPROVAL_CHOICES, default='none')
+    shipment_requested_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='requested_shipments')
+    shipment_approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_shipments')
+    shipment_approved_date = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='dispatches')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     def __str__(self):
         return f"{self.dispatch_number} - {self.buyer.buyer_name}"
-    
+
+    @property
+    def is_status_locked(self):
+        """Once a Shipped request is approved, status can never change again."""
+        return self.shipment_approval == 'approved'
+
     class Meta:
         ordering = ['-dispatch_date']
 
@@ -499,6 +536,7 @@ class StockAdjustment(models.Model):
         ('qc_failure', 'QC Failure'),
         ('recount', 'Recount Adjustment'),
         ('return', 'Return to Supplier'),
+        ('issue', 'Issued to Production'),
         ('other', 'Other'),
     ]
 
@@ -506,18 +544,27 @@ class StockAdjustment(models.Model):
         ('increase', 'Increase Stock'),
         ('decrease', 'Decrease Stock'),
     ]
-    
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending Approval'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
     adjustment_type = models.CharField(max_length=20, choices=ADJUSTMENT_TYPES)
     direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES, default='decrease')
     fabric = models.ForeignKey(Fabric, on_delete=models.SET_NULL, null=True, blank=True, related_name='adjustments')
     fabric_roll = models.ForeignKey(FabricRoll, on_delete=models.SET_NULL, null=True, blank=True, related_name='adjustments')
     trim = models.ForeignKey(Trim, on_delete=models.SET_NULL, null=True, blank=True, related_name='adjustments')
     finished_goods = models.ForeignKey(FinishedGoods, on_delete=models.SET_NULL, null=True, blank=True, related_name='adjustments')
+    purchase_order = models.ForeignKey('accounts.PurchaseOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='stock_adjustments')
     adjustment_date = models.DateField()
     quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='approved_adjustments')
     approved_date = models.DateField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_adjustments')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -527,9 +574,34 @@ class StockAdjustment(models.Model):
         if not self.pk:
             return "SA-PENDING"
         return f"SA-{self.adjustment_date.strftime('%y%m%d')}-{self.pk:05d}"
-    
+
+    @property
+    def effective_quantity(self):
+        """
+        Total quantity this adjustment moves. Lot-wise adjustments (with
+        StockAdjustmentDetail rows) carry the real total across their lines;
+        `quantity` itself is only a placeholder in that case. Adjustments
+        with no detail rows (Finished Goods, Trim, or a plain non-lot
+        Fabric correction) use `quantity` directly.
+        """
+        total = self.details.aggregate(total=models.Sum('quantity'))['total']
+        return total if total is not None else self.quantity
+
     def __str__(self):
         return f"{self.adjustment_number} - {self.adjustment_type}"
 
     class Meta:
         ordering = ['-adjustment_date']
+
+class StockAdjustmentDetail(models.Model):
+    """
+    One lot's worth of a lot-wise Stock Adjustment (Fabric only - Trim and
+    Finished Goods aren't lot-tracked, so their adjustments have no detail
+    rows and use StockAdjustment.quantity directly instead).
+    """
+    stock_adjustment = models.ForeignKey(StockAdjustment, on_delete=models.CASCADE, related_name='details')
+    fabric_roll = models.ForeignKey(FabricRoll, on_delete=models.CASCADE, related_name='adjustment_details')
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+
+    def __str__(self):
+        return f"{self.stock_adjustment.adjustment_number} - {self.fabric_roll.lot_number} ({self.quantity})"

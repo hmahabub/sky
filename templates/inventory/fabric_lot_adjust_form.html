@@ -1,0 +1,142 @@
+{% extends 'base/base.html' %}
+{% load static %}
+
+{% block title %}Adjust / Issue Stock - {{ fabric.fabric_name }} - SkyTex ERP{% endblock %}
+
+{% block page_title %}Adjust / Issue Stock{% endblock %}
+
+{% block content %}
+<style>
+    .compact-form .form-label {
+        margin-bottom: 0.15rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .compact-form .form-control,
+    .compact-form .form-select {
+        padding: 0.3rem 0.5rem;
+        font-size: 0.85rem;
+    }
+    .compact-form textarea.form-control {
+        height: auto;
+        min-height: 50px;
+    }
+</style>
+
+<div class="container-fluid">
+    <div class="page-header">
+        <div>
+            <h5 class="mb-1">{{ fabric.fabric_code }} - {{ fabric.fabric_name }}</h5>
+            <p class="text-muted small mb-0">Currently {{ fabric.current_stock|floatformat:2 }} {{ fabric.get_unit_display }} in stock across {{ lots|length }} lot{{ lots|length|pluralize }}</p>
+        </div>
+    </div>
+
+    <div class="alert alert-info py-2 small">
+        <i class="fas fa-info-circle"></i>
+        This will be <strong>submitted for approval</strong> - stock won't change until an admin approves it.
+        Enter a quantity against one or more lots below.
+    </div>
+
+    <form method="post" class="compact-form">
+        {% csrf_token %}
+
+        {% if form.errors %}
+            <div class="alert alert-danger">
+                <strong>Please fix the following errors:</strong>
+                <ul class="mb-0 ps-3">
+                    {% for field, errors in form.errors.items %}
+                        <li>{{ field }}: {{ errors|join:", " }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+
+        <div class="stat-card mb-3">
+            <div class="row g-2">
+                <div class="col-md-3">
+                    <div class="mb-3">
+                        <label class="form-label">Adjustment Type *</label>
+                        {{ form.adjustment_type }}
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="mb-3">
+                        <label class="form-label">Direction *</label>
+                        {{ form.direction }}
+                        <div class="form-text">Issuing to production is a decrease.</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="mb-3">
+                        <label class="form-label">Purchase Order</label>
+                        {{ form.purchase_order }}
+                        <div class="form-text">{{ form.purchase_order.help_text }}</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="mb-3">
+                        <label class="form-label">Date *</label>
+                        {{ form.adjustment_date }}
+                    </div>
+                </div>
+            </div>
+            <div class="row g-2">
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label class="form-label">Reason *</label>
+                        {{ form.reason }}
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        {{ form.notes }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stat-card mb-3">
+            <h6 class="border-bottom pb-2">Lot-wise Quantity</h6>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover">
+                    <thead>
+                        <tr>
+                            <th>Lot No.</th>
+                            <th>Received</th>
+                            <th>Remaining</th>
+                            <th style="width: 180px;">Quantity</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for lot in lots %}
+                        <tr>
+                            <td>{{ lot.lot_number }}</td>
+                            <td>{{ lot.received_date }}</td>
+                            <td>{{ lot.remaining_length|floatformat:2 }} {{ fabric.get_unit_display }}</td>
+                            <td>
+                                <input type="number" step="0.01" min="0" class="form-control form-control-sm"
+                                       name="quantity_{{ lot.pk }}" placeholder="0.00">
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="4" class="text-center text-muted py-3">No lots in stock for this fabric.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="mt-2">
+            <button type="submit" class="btn btn-gradient">
+                <i class="fas fa-paper-plane"></i> Submit for Approval
+            </button>
+            <a href="{% url 'inventory:fabric_stock_ledger' fabric.pk %}" class="btn btn-secondary">
+                <i class="fas fa-times"></i> Cancel
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock %}
