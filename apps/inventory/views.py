@@ -16,7 +16,9 @@ from .models import (
     TrimReceipt, TrimReceiptDetail,
     ProductionIssue, ProductionIssueDetail, FinishedGoods,
     FinishedGoodsProduction, Dispatch, DispatchDetail,
-    StockMovement, StockAdjustment, StockAdjustmentDetail
+    StockMovement, StockAdjustment, StockAdjustmentDetail,
+    Machine, MachineEvent, SparePart, SparePartConsumption,
+    StationeryItem, StationeryConsumption, SupplyAdjustment,
 )
 from .forms import (
     FabricForm, FabricRollForm, FabricStockInForm, FabricLotAdjustForm,
@@ -24,7 +26,11 @@ from .forms import (
     GoodsReceiptDetailForm, TrimReceiptForm, TrimReceiptDetailForm,
     ProductionIssueForm, ProductionIssueDetailForm,
     FinishedGoodsForm, FinishedGoodsStockInForm,
-    DispatchForm, DispatchDetailForm, StockAdjustmentForm, RejectStockAdjustmentForm
+    DispatchForm, DispatchDetailForm, StockAdjustmentForm, RejectStockAdjustmentForm,
+    MachineForm, MachineEventForm, RejectMachineEventForm,
+    SparePartForm, SparePartStockInForm, SparePartConsumptionForm,
+    StationeryItemForm, StationeryStockInForm, StationeryConsumptionForm,
+    SupplyAdjustmentForm, RejectSupplyAdjustmentForm,
 )
 
 def is_inventory_or_admin(user):
@@ -1277,7 +1283,11 @@ def _apply_stock_adjustment(adjustment):
 @login_required
 @user_passes_test(lambda u: u.is_superuser)
 def pending_adjustments(request):
-    """Stock adjustments and dispatch shipments awaiting approval - superuser only."""
+    """
+    Everything awaiting superuser approval across the warehouse: Stock
+    Adjustments, Dispatch shipments, Machine sold/scrapped requests, and
+    Supply (Spare Part/Stationery) Adjustments - superuser only.
+    """
     adjustments = StockAdjustment.objects.filter(status='pending').select_related(
         'fabric', 'trim', 'finished_goods', 'created_by'
     ).prefetch_related('details__fabric_roll')
@@ -1286,11 +1296,21 @@ def pending_adjustments(request):
         'buyer', 'style', 'shipment_requested_by'
     )
 
+    machine_events = MachineEvent.objects.filter(status='pending').select_related(
+        'machine', 'created_by'
+    )
+
+    supply_adjustments_pending = SupplyAdjustment.objects.filter(status='pending').select_related(
+        'spare_part', 'stationery_item', 'created_by'
+    )
+
     context = {
         'active': 'inventory',
         'page_title': 'Pending Approvals',
         'adjustments': adjustments,
         'dispatch_shipments': dispatch_shipments,
+        'machine_events': machine_events,
+        'supply_adjustments_pending': supply_adjustments_pending,
     }
     return render(request, 'inventory/pending_adjustments.html', context)
 
@@ -1515,3 +1535,633 @@ def stock_report_export_pdf(request):
 
     doc.build(elements)
     return response
+
+# =============================================================== machines
+
+@login_required
+def machine_list(request):
+    """List all machines"""
+    machines = Machine.objects.select_related('department', 'supplier')
+
+    search = request.GET.get('search')
+    if search:
+        machines = machines.filter(
+            Q(machine_code__icontains=search) |
+            Q(machine_name__icontains=search) |
+            Q(brand__icontains=search) |
+            Q(serial_number__icontains=search)
+        )
+
+    machine_type = request.GET.get('type')
+    if machine_type:
+        machines = machines.filter(machine_type=machine_type)
+
+    status = request.GET.get('status')
+    if status:
+        machines = machines.filter(status=status)
+
+    department_id = request.GET.get('department')
+    if department_id:
+        machines = machines.filter(department_id=department_id)
+
+    paginator = Paginator(machines, 20)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    from apps.hr.models import Department
+    context = {
+        'active': 'inventory',
+        'page_title': 'Machines',
+        'machines': page_obj,
+        'machine_types': Machine.MACHINE_TYPES,
+        'statuses': Machine.STATUS_CHOICES,
+        'departments': Department.objects.all(),
+        'search': search,
+        'current_type': machine_type,
+        'current_status': status,
+        'current_department': department_id,
+    }
+    return render(request, 'inventory/machine_list.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def add_machine(request):
+    """Add new machine"""
+    if request.method == 'POST':
+        form = MachineForm(request.POST)
+        if form.is_valid():
+            machine = form.save(commit=False)
+            machine.created_by = request.user
+            machine.save()
+            messages.success(request, f'Machine "{machine.machine_code}" added successfully!')
+            return redirect('inventory:machine_list')
+    else:
+        form = MachineForm()
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Add Machine',
+        'form': form,
+    }
+    return render(request, 'inventory/machine_form.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def edit_machine(request, pk):
+    """Edit machine"""
+    machine = get_object_or_404(Machine, pk=pk)
+    if request.method == 'POST':
+        form = MachineForm(request.POST, instance=machine)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Machine "{machine.machine_code}" updated successfully!')
+            return redirect('inventory:machine_detail', pk=machine.pk)
+    else:
+        form = MachineForm(instance=machine)
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Edit Machine',
+        'form': form,
+        'machine': machine,
+    }
+    return render(request, 'inventory/machine_form.html', context)
+
+@login_required
+def machine_detail(request, pk):
+    """Machine detail: info + event timeline + recent spare-part consumption against it."""
+    machine = get_object_or_404(Machine.objects.select_related('department', 'supplier'), pk=pk)
+    context = {
+        'active': 'inventory',
+        'page_title': f'{machine.machine_code} - {machine.machine_name}',
+        'machine': machine,
+        'events': machine.events.select_related('created_by', 'approved_by'),
+        'spare_part_consumptions': machine.spare_part_consumptions.select_related(
+            'spare_part', 'department'
+        ).order_by('-consumption_date')[:20],
+    }
+    return render(request, 'inventory/machine_detail.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def add_machine_event(request, pk):
+    """
+    Log an event against a machine. 'Sold'/'Scrapped' are created as
+    pending and don't change Machine.status until a superuser approves
+    them (approve_machine_event) - mirrors Dispatch.shipment_approval.
+    Every other event type applies immediately and updates Machine.status
+    to match.
+    """
+    machine = get_object_or_404(Machine, pk=pk)
+    if request.method == 'POST':
+        form = MachineEventForm(request.POST)
+        if form.is_valid():
+            event = form.save(commit=False)
+            event.machine = machine
+            event.created_by = request.user
+
+            if event.event_type in ('sold', 'scrapped'):
+                event.status = 'pending'
+                event.save()
+                messages.success(
+                    request,
+                    f'"{event.get_event_type_display()}" submitted for approval - '
+                    'the machine stays active until an admin approves it.'
+                )
+            else:
+                event.status = 'approved'
+                event.approved_by = request.user
+                event.approved_date = date.today()
+                event.save()
+
+                status_map = {
+                    'breakdown': 'broken_down',
+                    'repair_started': 'under_maintenance',
+                    'repair_completed': 'active',
+                    'maintenance': 'under_maintenance',
+                }
+                new_status = status_map.get(event.event_type)
+                if new_status and new_status != machine.status:
+                    machine.status = new_status
+                    machine.save(update_fields=['status'])
+
+                messages.success(request, f'"{event.get_event_type_display()}" logged for {machine.machine_code}.')
+
+            return redirect('inventory:machine_detail', pk=machine.pk)
+    else:
+        form = MachineEventForm()
+
+    context = {
+        'active': 'inventory',
+        'page_title': f'Log Event - {machine.machine_code}',
+        'form': form,
+        'machine': machine,
+    }
+    return render(request, 'inventory/machine_event_form.html', context)
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def approve_machine_event(request, pk, event_pk):
+    """Approve a pending Sold/Scrapped request - this is the only place Machine.status becomes sold/scrapped."""
+    machine = get_object_or_404(Machine, pk=pk)
+    event = get_object_or_404(MachineEvent, pk=event_pk, machine=machine)
+    if request.method == 'POST' and event.status == 'pending':
+        event.status = 'approved'
+        event.approved_by = request.user
+        event.approved_date = date.today()
+        event.save(update_fields=['status', 'approved_by', 'approved_date'])
+
+        machine.status = event.event_type  # 'sold'/'scrapped' match Machine.STATUS_CHOICES exactly
+        machine.save(update_fields=['status'])
+
+        messages.success(request, f'"{event.get_event_type_display()}" approved for {machine.machine_code}.')
+    return redirect('inventory:machine_detail', pk=machine.pk)
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def reject_machine_event(request, pk, event_pk):
+    """Reject a pending Sold/Scrapped request - Machine.status is untouched."""
+    machine = get_object_or_404(Machine, pk=pk)
+    event = get_object_or_404(MachineEvent, pk=event_pk, machine=machine)
+    if request.method == 'POST' and event.status == 'pending':
+        form = RejectMachineEventForm(request.POST)
+        if form.is_valid():
+            event.status = 'rejected'
+            event.rejection_reason = form.cleaned_data['rejection_reason']
+            event.approved_by = request.user
+            event.approved_date = date.today()
+            event.save(update_fields=['status', 'rejection_reason', 'approved_by', 'approved_date'])
+            messages.success(request, f'"{event.get_event_type_display()}" request rejected.')
+        else:
+            messages.error(request, "A rejection reason is required.")
+    return redirect('inventory:machine_detail', pk=machine.pk)
+
+# ============================================================= spare parts
+
+@login_required
+def spare_part_list(request):
+    """List all spare parts"""
+    parts = SparePart.objects.filter(is_active=True).select_related('supplier')
+
+    search = request.GET.get('search')
+    if search:
+        parts = parts.filter(Q(part_name__icontains=search))
+
+    category = request.GET.get('category')
+    if category:
+        parts = parts.filter(category=category)
+
+    stock_status = request.GET.get('stock_status')
+    if stock_status == 'low':
+        parts = parts.filter(current_stock__lte=F('min_stock'))
+    elif stock_status == 'normal':
+        parts = parts.filter(current_stock__gt=F('min_stock'), current_stock__lt=F('max_stock'))
+    elif stock_status == 'overstock':
+        parts = parts.filter(current_stock__gte=F('max_stock'))
+
+    paginator = Paginator(parts, 20)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Spare Parts',
+        'spare_parts': page_obj,
+        'categories': SparePart.CATEGORY_CHOICES,
+        'search': search,
+        'current_category': category,
+        'current_stock_status': stock_status,
+    }
+    return render(request, 'inventory/spare_part_list.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def add_spare_part(request):
+    """Add new spare part"""
+    if request.method == 'POST':
+        form = SparePartForm(request.POST)
+        if form.is_valid():
+            part = form.save()
+            messages.success(request, f'Spare part "{part.part_name}" added successfully!')
+            return redirect('inventory:spare_part_list')
+    else:
+        form = SparePartForm()
+
+    context = {'active': 'inventory', 'page_title': 'Add Spare Part', 'form': form}
+    return render(request, 'inventory/spare_part_form.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def edit_spare_part(request, pk):
+    """Edit spare part"""
+    part = get_object_or_404(SparePart, pk=pk)
+    if request.method == 'POST':
+        form = SparePartForm(request.POST, instance=part)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Spare part "{part.part_name}" updated successfully!')
+            return redirect('inventory:spare_part_list')
+    else:
+        form = SparePartForm(instance=part)
+
+    context = {'active': 'inventory', 'page_title': 'Edit Spare Part', 'form': form, 'spare_part': part}
+    return render(request, 'inventory/spare_part_form.html', context)
+
+@login_required
+def spare_part_stock_ledger(request, pk):
+    """All stock-affecting activity for a single spare part, newest first, with a running balance."""
+    part = get_object_or_404(SparePart, pk=pk)
+    movements = list(StockMovement.objects.filter(spare_part=part).order_by('movement_date', 'created_at'))
+
+    total_delta = sum((m.quantity for m in movements), Decimal('0'))
+    running_balance = Decimal(part.current_stock) - total_delta
+    for movement in movements:
+        running_balance += movement.quantity
+        movement.balance_after = running_balance
+    movements.reverse()
+
+    context = {
+        'active': 'inventory',
+        'page_title': f'Stock Ledger - {part.part_name}',
+        'spare_part': part,
+        'movements': movements,
+        'consumptions': part.consumptions.select_related('department', 'machine').order_by('-consumption_date')[:20],
+    }
+    return render(request, 'inventory/spare_part_stock_ledger.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def add_spare_part_stock(request, pk):
+    """Add stock to a spare part - immediate, no approval (mirrors add_trim_stock)."""
+    part = get_object_or_404(SparePart, pk=pk)
+    if request.method == 'POST':
+        form = SparePartStockInForm(request.POST)
+        if form.is_valid():
+            quantity = form.cleaned_data['quantity']
+            with transaction.atomic():
+                SparePart.objects.filter(pk=part.pk).update(current_stock=F('current_stock') + quantity)
+                movement = StockMovement.objects.create(
+                    movement_type='receipt', reference_number='', reference_id=part.pk,
+                    spare_part=part, quantity=quantity,
+                    notes=form.cleaned_data['notes'], created_by=request.user,
+                )
+                movement.reference_number = movement.movement_number
+                movement.save(update_fields=['reference_number'])
+            messages.success(request, f'Added {quantity} units to "{part.part_name}" stock.')
+            return redirect('inventory:spare_part_stock_ledger', pk=part.pk)
+    else:
+        form = SparePartStockInForm()
+
+    context = {'active': 'inventory', 'page_title': 'Add Stock', 'form': form, 'spare_part': part}
+    return render(request, 'inventory/spare_part_stock_in_form.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def record_spare_part_consumption(request, pk):
+    """
+    Record a department's (optionally machine-linked) use of a spare part.
+    Immediate - not approval-gated, this is routine maintenance logging,
+    not a correction (see SupplyAdjustment for corrections).
+    """
+    part = get_object_or_404(SparePart, pk=pk)
+    if request.method == 'POST':
+        form = SparePartConsumptionForm(request.POST)
+        if form.is_valid():
+            quantity = form.cleaned_data['quantity']
+            if quantity > part.current_stock:
+                messages.error(request, f"Can't consume {quantity}: only {part.current_stock} in stock.")
+            else:
+                department = form.cleaned_data['department']
+                with transaction.atomic():
+                    SparePartConsumption.objects.create(
+                        spare_part=part,
+                        department=department,
+                        machine=form.cleaned_data['machine'],
+                        quantity=quantity,
+                        unit_price_at_consumption=part.unit_price,
+                        consumption_date=form.cleaned_data['consumption_date'],
+                        notes=form.cleaned_data['notes'],
+                        issued_by=request.user,
+                    )
+                    SparePart.objects.filter(pk=part.pk).update(current_stock=F('current_stock') - quantity)
+                    movement = StockMovement.objects.create(
+                        movement_type='issue', reference_number='', reference_id=part.pk,
+                        spare_part=part, quantity=-quantity,
+                        notes=f"Issued to {department.name}", created_by=request.user,
+                    )
+                    movement.reference_number = movement.movement_number
+                    movement.save(update_fields=['reference_number'])
+                messages.success(request, f'Recorded consumption of {quantity} units of "{part.part_name}".')
+                return redirect('inventory:spare_part_stock_ledger', pk=part.pk)
+    else:
+        form = SparePartConsumptionForm()
+
+    context = {'active': 'inventory', 'page_title': 'Record Consumption', 'form': form, 'spare_part': part}
+    return render(request, 'inventory/spare_part_consumption_form.html', context)
+
+# ============================================================== stationery
+
+@login_required
+def stationery_list(request):
+    """List all stationery items"""
+    items = StationeryItem.objects.filter(is_active=True)
+
+    search = request.GET.get('search')
+    if search:
+        items = items.filter(Q(item_name__icontains=search))
+
+    category = request.GET.get('category')
+    if category:
+        items = items.filter(category=category)
+
+    stock_status = request.GET.get('stock_status')
+    if stock_status == 'low':
+        items = items.filter(current_stock__lte=F('min_stock'))
+    elif stock_status == 'normal':
+        items = items.filter(current_stock__gt=F('min_stock'), current_stock__lt=F('max_stock'))
+    elif stock_status == 'overstock':
+        items = items.filter(current_stock__gte=F('max_stock'))
+
+    paginator = Paginator(items, 20)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Stationery',
+        'stationery_items': page_obj,
+        'categories': StationeryItem.CATEGORY_CHOICES,
+        'search': search,
+        'current_category': category,
+        'current_stock_status': stock_status,
+    }
+    return render(request, 'inventory/stationery_list.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def add_stationery_item(request):
+    """Add new stationery item"""
+    if request.method == 'POST':
+        form = StationeryItemForm(request.POST)
+        if form.is_valid():
+            item = form.save()
+            messages.success(request, f'Stationery item "{item.item_name}" added successfully!')
+            return redirect('inventory:stationery_list')
+    else:
+        form = StationeryItemForm()
+
+    context = {'active': 'inventory', 'page_title': 'Add Stationery Item', 'form': form}
+    return render(request, 'inventory/stationery_form.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def edit_stationery_item(request, pk):
+    """Edit stationery item"""
+    item = get_object_or_404(StationeryItem, pk=pk)
+    if request.method == 'POST':
+        form = StationeryItemForm(request.POST, instance=item)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Stationery item "{item.item_name}" updated successfully!')
+            return redirect('inventory:stationery_list')
+    else:
+        form = StationeryItemForm(instance=item)
+
+    context = {'active': 'inventory', 'page_title': 'Edit Stationery Item', 'form': form, 'stationery_item': item}
+    return render(request, 'inventory/stationery_form.html', context)
+
+@login_required
+def stationery_stock_ledger(request, pk):
+    """All stock-affecting activity for a single stationery item, newest first, with a running balance."""
+    item = get_object_or_404(StationeryItem, pk=pk)
+    movements = list(StockMovement.objects.filter(stationery_item=item).order_by('movement_date', 'created_at'))
+
+    total_delta = sum((m.quantity for m in movements), Decimal('0'))
+    running_balance = Decimal(item.current_stock) - total_delta
+    for movement in movements:
+        running_balance += movement.quantity
+        movement.balance_after = running_balance
+    movements.reverse()
+
+    context = {
+        'active': 'inventory',
+        'page_title': f'Stock Ledger - {item.item_name}',
+        'stationery_item': item,
+        'movements': movements,
+        'consumptions': item.consumptions.select_related('department').order_by('-consumption_date')[:20],
+    }
+    return render(request, 'inventory/stationery_stock_ledger.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def add_stationery_stock(request, pk):
+    """Add stock to a stationery item - immediate, no approval."""
+    item = get_object_or_404(StationeryItem, pk=pk)
+    if request.method == 'POST':
+        form = StationeryStockInForm(request.POST)
+        if form.is_valid():
+            quantity = form.cleaned_data['quantity']
+            with transaction.atomic():
+                StationeryItem.objects.filter(pk=item.pk).update(current_stock=F('current_stock') + quantity)
+                movement = StockMovement.objects.create(
+                    movement_type='receipt', reference_number='', reference_id=item.pk,
+                    stationery_item=item, quantity=quantity,
+                    notes=form.cleaned_data['notes'], created_by=request.user,
+                )
+                movement.reference_number = movement.movement_number
+                movement.save(update_fields=['reference_number'])
+            messages.success(request, f'Added {quantity} units to "{item.item_name}" stock.')
+            return redirect('inventory:stationery_stock_ledger', pk=item.pk)
+    else:
+        form = StationeryStockInForm()
+
+    context = {'active': 'inventory', 'page_title': 'Add Stock', 'form': form, 'stationery_item': item}
+    return render(request, 'inventory/stationery_stock_in_form.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def record_stationery_consumption(request, pk):
+    """Record a department's use of a stationery item - immediate, not approval-gated."""
+    item = get_object_or_404(StationeryItem, pk=pk)
+    if request.method == 'POST':
+        form = StationeryConsumptionForm(request.POST)
+        if form.is_valid():
+            quantity = form.cleaned_data['quantity']
+            if quantity > item.current_stock:
+                messages.error(request, f"Can't consume {quantity}: only {item.current_stock} in stock.")
+            else:
+                department = form.cleaned_data['department']
+                with transaction.atomic():
+                    StationeryConsumption.objects.create(
+                        stationery_item=item,
+                        department=department,
+                        quantity=quantity,
+                        unit_price_at_consumption=item.unit_price,
+                        consumption_date=form.cleaned_data['consumption_date'],
+                        notes=form.cleaned_data['notes'],
+                        issued_by=request.user,
+                    )
+                    StationeryItem.objects.filter(pk=item.pk).update(current_stock=F('current_stock') - quantity)
+                    movement = StockMovement.objects.create(
+                        movement_type='issue', reference_number='', reference_id=item.pk,
+                        stationery_item=item, quantity=-quantity,
+                        notes=f"Issued to {department.name}", created_by=request.user,
+                    )
+                    movement.reference_number = movement.movement_number
+                    movement.save(update_fields=['reference_number'])
+                messages.success(request, f'Recorded consumption of {quantity} units of "{item.item_name}".')
+                return redirect('inventory:stationery_stock_ledger', pk=item.pk)
+    else:
+        form = StationeryConsumptionForm()
+
+    context = {'active': 'inventory', 'page_title': 'Record Consumption', 'form': form, 'stationery_item': item}
+    return render(request, 'inventory/stationery_consumption_form.html', context)
+
+# ========================================================= supply adjustments
+
+@login_required
+def supply_adjustments(request):
+    """List all supply adjustments (Spare Parts + Stationery)"""
+    adjustments = SupplyAdjustment.objects.select_related(
+        'spare_part', 'stationery_item', 'created_by', 'approved_by'
+    )
+    context = {
+        'active': 'inventory',
+        'page_title': 'Supply Adjustments',
+        'adjustments': adjustments,
+    }
+    return render(request, 'inventory/supply_adjustments.html', context)
+
+@login_required
+@user_passes_test(is_inventory_or_admin)
+def add_supply_adjustment(request):
+    """Request a correction for a Spare Part or Stationery Item - pending until a superuser approves it."""
+    if request.method == 'POST':
+        form = SupplyAdjustmentForm(request.POST)
+        if form.is_valid():
+            adjustment = form.save(commit=False)
+            adjustment.status = 'pending'
+            adjustment.created_by = request.user
+            adjustment.save()
+            messages.success(
+                request,
+                f'Adjustment "{adjustment.adjustment_number}" submitted for approval - '
+                'stock will update once an admin approves it.'
+            )
+            return redirect('inventory:supply_adjustments')
+    else:
+        form = SupplyAdjustmentForm()
+
+    context = {
+        'active': 'inventory',
+        'page_title': 'Add Supply Adjustment',
+        'form': form,
+    }
+    return render(request, 'inventory/supply_adjustment_form.html', context)
+
+def _apply_supply_adjustment(adjustment):
+    """
+    Apply an approved SupplyAdjustment's stock effect. Must be called
+    inside a transaction.atomic() block by the caller. Mirrors
+    _apply_stock_adjustment's single-target branch.
+    """
+    quantity = adjustment.quantity
+    signed_quantity = quantity if adjustment.direction == 'increase' else -quantity
+
+    if adjustment.spare_part_id:
+        part = SparePart.objects.select_for_update().get(pk=adjustment.spare_part_id)
+        if adjustment.direction == 'decrease' and quantity > part.current_stock:
+            raise ValueError(f"Can't decrease stock by {quantity}: only {part.current_stock} in stock.")
+        part.current_stock += signed_quantity
+        part.save(update_fields=['current_stock'])
+    elif adjustment.stationery_item_id:
+        item = StationeryItem.objects.select_for_update().get(pk=adjustment.stationery_item_id)
+        if adjustment.direction == 'decrease' and quantity > item.current_stock:
+            raise ValueError(f"Can't decrease stock by {quantity}: only {item.current_stock} in stock.")
+        item.current_stock += signed_quantity
+        item.save(update_fields=['current_stock'])
+
+    StockMovement.objects.create(
+        movement_type='adjustment',
+        reference_number=adjustment.adjustment_number,
+        reference_id=adjustment.pk,
+        spare_part_id=adjustment.spare_part_id,
+        stationery_item_id=adjustment.stationery_item_id,
+        quantity=signed_quantity,
+        notes=adjustment.reason,
+        created_by=adjustment.approved_by,
+    )
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def approve_supply_adjustment(request, pk):
+    """Approve a pending supply adjustment - this is the only place stock actually changes."""
+    adjustment = get_object_or_404(SupplyAdjustment, pk=pk)
+    if request.method == 'POST' and adjustment.status == 'pending':
+        try:
+            with transaction.atomic():
+                adjustment.approved_by = request.user
+                adjustment.approved_date = date.today()
+                _apply_supply_adjustment(adjustment)
+                adjustment.status = 'approved'
+                adjustment.save(update_fields=['status', 'approved_by', 'approved_date'])
+        except ValueError as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, f'Adjustment "{adjustment.adjustment_number}" approved - stock updated.')
+    return redirect('inventory:supply_adjustments')
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def reject_supply_adjustment(request, pk):
+    """Reject a pending supply adjustment - no stock change."""
+    adjustment = get_object_or_404(SupplyAdjustment, pk=pk)
+    if request.method == 'POST' and adjustment.status == 'pending':
+        form = RejectSupplyAdjustmentForm(request.POST)
+        if form.is_valid():
+            adjustment.status = 'rejected'
+            adjustment.rejection_reason = form.cleaned_data['rejection_reason']
+            adjustment.approved_by = request.user
+            adjustment.approved_date = date.today()
+            adjustment.save(update_fields=['status', 'rejection_reason', 'approved_by', 'approved_date'])
+            messages.success(request, f'Adjustment "{adjustment.adjustment_number}" rejected.')
+        else:
+            messages.error(request, "A rejection reason is required.")
+    return redirect('inventory:supply_adjustments')

@@ -33,6 +33,8 @@ from apps.inventory.models import (
     TrimReceipt, TrimReceiptDetail, ProductionIssue, ProductionIssueDetail,
     FinishedGoods, FinishedGoodsProduction, Dispatch, DispatchDetail,
     StockMovement, StockAdjustment, StockAdjustmentDetail,
+    Machine, MachineEvent, SparePart, SparePartConsumption,
+    StationeryItem, StationeryConsumption, SupplyAdjustment,
 )
 
 TODAY = date.today()
@@ -80,6 +82,15 @@ class Command(BaseCommand):
             self.seed_production_issues()
             self.seed_dispatches()
             self.seed_stock_adjustments()
+
+            self.seed_machines()
+            self.seed_machine_events()
+            self.seed_spare_parts()
+            self.seed_spare_part_consumptions()
+            self.seed_stationery_items()
+            self.seed_stationery_consumptions()
+            self.seed_supply_adjustments()
+
             self.clamp_negative_stock()
 
         self.stdout.write(self.style.SUCCESS("Seed data complete."))
@@ -862,6 +873,218 @@ class Command(BaseCommand):
             adjustment.quantity = total
             adjustment.save(update_fields=['quantity'])
 
+    # ---------------------------------------------------------------- machines
+
+    def seed_machines(self):
+        specs = [
+            ('MC-00001', 'Single Needle Lockstitch #1', 'sewing_single_needle', 'Juki', 'active'),
+            ('MC-00002', 'Single Needle Lockstitch #2', 'sewing_single_needle', 'Juki', 'active'),
+            ('MC-00003', 'Overlock Machine #1', 'sewing_overlock', 'Brother', 'active'),
+            ('MC-00004', 'Overlock Machine #2', 'sewing_overlock', 'Brother', 'idle'),
+            ('MC-00005', 'Flatlock Machine #1', 'sewing_flatlock', 'Pegasus', 'active'),
+            ('MC-00006', 'Bartack Machine #1', 'sewing_bartack', 'Juki', 'active'),
+            ('MC-00007', 'Buttonhole Machine #1', 'sewing_buttonhole', 'Jack', 'under_maintenance'),
+            ('MC-00008', 'Straight Knife Cutter', 'cutting_straight_knife', 'Eastman', 'active'),
+            ('MC-00009', 'Band Knife Cutter', 'cutting_band_knife', 'Eastman', 'broken_down'),
+            ('MC-00010', 'Fusing Press #1', 'fusing_press', 'Hashima', 'active'),
+            ('MC-00011', 'Embroidery Machine #1', 'embroidery', 'Tajima', 'active'),
+            ('MC-00012', 'Washing Machine #1', 'washing', 'Union', 'active'),
+            ('MC-00013', 'Boiler Unit #1', 'boiler', 'Cleaver Brooks', 'active'),
+            ('MC-00014', 'Generator Unit #1', 'generator', 'Cummins', 'idle'),
+            ('MC-00015', 'Air Compressor #1', 'compressor', 'Atlas Copco', 'active'),
+        ]
+        dept_by_type = {
+            'sewing': 'SEW', 'cutting': 'CUT', 'fusing_press': 'SEW',
+            'embroidery': 'SEW', 'washing': 'FIN', 'boiler': 'MNT',
+            'generator': 'MNT', 'compressor': 'MNT',
+        }
+        self.machines = []
+        for code, name, m_type, brand, status in specs:
+            dept_code = next((v for k, v in dept_by_type.items() if m_type.startswith(k)), 'MNT')
+            machine, _ = Machine.objects.get_or_create(
+                machine_code=code,
+                defaults=dict(
+                    machine_name=name, machine_type=m_type, brand=brand,
+                    model_number=f"{brand[:2].upper()}-{random.randint(100,999)}",
+                    serial_number=f"SN{random.randint(100000,999999)}",
+                    supplier=random.choice(self.suppliers),
+                    department=self.departments.get(dept_code),
+                    line_number=f"Line-{random.randint(1,6)}",
+                    location=f"Floor {random.randint(1,3)}, Line-{random.randint(1,6)}",
+                    purchase_date=rand_date(180, 1500),
+                    purchase_cost=Decimal(random.randint(50000, 800000)),
+                    warranty_expiry=rand_date(-365, 365),
+                    status=status,
+                    created_by=self.user,
+                ),
+            )
+            self.machines.append(machine)
+
+    def seed_machine_events(self):
+        if MachineEvent.objects.exists():
+            return
+        broken = next((m for m in self.machines if m.status == 'broken_down'), None)
+        if broken:
+            MachineEvent.objects.create(
+                machine=broken, event_type='breakdown', event_date=rand_date(1, 10),
+                description="Needle bar jammed, reported by line supervisor.",
+                status='approved', approved_by=self.user, approved_date=date.today(),
+                created_by=self.user,
+            )
+        maintenance = next((m for m in self.machines if m.status == 'under_maintenance'), None)
+        if maintenance:
+            MachineEvent.objects.create(
+                machine=maintenance, event_type='maintenance', event_date=rand_date(1, 5),
+                description="Routine servicing.", cost=Decimal(random.randint(500, 3000)),
+                status='approved', approved_by=self.user, approved_date=date.today(),
+                created_by=self.user,
+            )
+        # One pending 'scrapped' request so Pending Approvals has a demo row.
+        idle = next((m for m in self.machines if m.status == 'idle'), None)
+        if idle:
+            MachineEvent.objects.create(
+                machine=idle, event_type='scrapped', event_date=date.today(),
+                description="Beyond economical repair - recommend scrapping.",
+                counterparty="Local scrap dealer", cost=Decimal(random.randint(2000, 8000)),
+                status='pending', created_by=self.user,
+            )
+
+    # ------------------------------------------------------------ spare parts
+
+    def seed_spare_parts(self):
+        names = [
+            ('Sewing Machine Needle DBx1', 'needle', 'sewing_single_needle'),
+            ('Overlock Needle', 'needle', 'sewing_overlock'),
+            ('Servo Motor', 'motor', 'sewing_single_needle'),
+            ('Drive Belt', 'belt', 'sewing_single_needle'),
+            ('Bobbin Case', 'bobbin', 'sewing_single_needle'),
+            ('Presser Foot Set', 'presser_foot', 'sewing_single_needle'),
+            ('Ball Bearing 6203', 'bearing', 'other'),
+            ('Feed Dog Gear', 'gear', 'sewing_single_needle'),
+            ('Control Board PCB', 'electronic_board', 'sewing_single_needle'),
+            ('Band Knife Blade', 'blade', 'cutting_band_knife'),
+            ('Straight Knife Blade', 'blade', 'cutting_straight_knife'),
+            ('Fusing Press Belt', 'belt', 'fusing_press'),
+        ]
+        stock_buckets = [20, 50, 100, 200, 400]
+        self.spare_parts = []
+        for i, (name, category, compat) in enumerate(names, start=1):
+            part, _ = SparePart.objects.get_or_create(
+                part_name=name,
+                defaults=dict(
+                    category=category, compatible_machine_type=compat,
+                    supplier=random.choice(self.suppliers),
+                    unit='pcs', unit_price=Decimal(str(round(random.uniform(1, 150), 2))),
+                    current_stock=stock_buckets[i % len(stock_buckets)],
+                    min_stock=30, max_stock=1000,
+                    description=f"{name} for demo machinery.",
+                ),
+            )
+            self.spare_parts.append(part)
+
+    def seed_spare_part_consumptions(self):
+        if SparePartConsumption.objects.exists():
+            return
+        departments = list(self.departments.values())
+        for _ in range(10):
+            part = random.choice(self.spare_parts)
+            if part.current_stock < 2:
+                continue
+            qty = random.randint(1, min(5, part.current_stock))
+            machine = random.choice(self.machines) if random.random() < 0.6 else None
+            SparePartConsumption.objects.create(
+                spare_part=part, department=random.choice(departments), machine=machine,
+                quantity=qty, unit_price_at_consumption=part.unit_price,
+                consumption_date=rand_date(0, 30), notes="Routine maintenance usage.",
+                issued_by=self.user,
+            )
+            SparePart.objects.filter(pk=part.pk).update(current_stock=F('current_stock') - qty)
+            StockMovement.objects.create(
+                movement_type='issue', reference_number=f"SPC-{part.pk}-{qty}",
+                reference_id=part.pk, spare_part=part, quantity=-qty,
+                notes="Demo consumption", created_by=self.user,
+            )
+
+    # ------------------------------------------------------------ stationery
+
+    def seed_stationery_items(self):
+        names = [
+            ('A4 Paper Ream', 'paper'), ('Ball Pen (Box of 50)', 'writing'),
+            ('Printer Toner Cartridge', 'printing'), ('File Folder', 'filing'),
+            ('Stapler', 'writing'), ('Whiteboard Marker', 'writing'),
+            ('Cleaning Cloth Roll', 'cleaning'), ('Hand Sanitizer Bottle', 'cleaning'),
+            ('Sticky Notes Pad', 'writing'), ('Envelope Pack', 'filing'),
+        ]
+        stock_buckets = [10, 30, 60, 120]
+        self.stationery_items = []
+        for i, (name, category) in enumerate(names, start=1):
+            item, _ = StationeryItem.objects.get_or_create(
+                item_name=name,
+                defaults=dict(
+                    category=category, unit='pcs',
+                    unit_price=Decimal(str(round(random.uniform(0.5, 40), 2))),
+                    current_stock=stock_buckets[i % len(stock_buckets)],
+                    min_stock=15, max_stock=500,
+                    description=f"{name} for office/floor use.",
+                ),
+            )
+            self.stationery_items.append(item)
+
+    def seed_stationery_consumptions(self):
+        if StationeryConsumption.objects.exists():
+            return
+        departments = list(self.departments.values())
+        for _ in range(8):
+            item = random.choice(self.stationery_items)
+            if item.current_stock < 2:
+                continue
+            qty = random.randint(1, min(5, item.current_stock))
+            StationeryConsumption.objects.create(
+                stationery_item=item, department=random.choice(departments),
+                quantity=qty, unit_price_at_consumption=item.unit_price,
+                consumption_date=rand_date(0, 30), notes="Routine office usage.",
+                issued_by=self.user,
+            )
+            StationeryItem.objects.filter(pk=item.pk).update(current_stock=F('current_stock') - qty)
+            StockMovement.objects.create(
+                movement_type='issue', reference_number=f"STC-{item.pk}-{qty}",
+                reference_id=item.pk, stationery_item=item, quantity=-qty,
+                notes="Demo consumption", created_by=self.user,
+            )
+
+    # ------------------------------------------------------- supply adjustments
+
+    def seed_supply_adjustments(self):
+        if SupplyAdjustment.objects.exists():
+            return
+        # One approved correction, already applied.
+        part = next((p for p in self.spare_parts if p.current_stock > 10), None)
+        if part:
+            qty = 3
+            adjustment = SupplyAdjustment.objects.create(
+                adjustment_type='damage', direction='decrease', spare_part=part,
+                adjustment_date=rand_date(1, 10), quantity=qty,
+                reason="Damaged in storage - demo approved adjustment.",
+                status='approved', created_by=self.user,
+                approved_by=self.user, approved_date=date.today(),
+            )
+            SparePart.objects.filter(pk=part.pk).update(current_stock=F('current_stock') - qty)
+            StockMovement.objects.create(
+                movement_type='adjustment', reference_number=adjustment.adjustment_number,
+                reference_id=adjustment.pk, spare_part=part, quantity=-qty,
+                notes=adjustment.reason, created_by=self.user,
+            )
+
+        # One pending correction so Pending Approvals has a demo row.
+        item = next((s for s in self.stationery_items if s.current_stock > 5), None)
+        if item:
+            SupplyAdjustment.objects.create(
+                adjustment_type='recount', direction='increase', stationery_item=item,
+                adjustment_date=date.today(), quantity=5,
+                reason="Physical recount found more stock than recorded - demo pending.",
+                status='pending', created_by=self.user,
+            )
+
     # ------------------------------------------------------------------- misc
 
     def clamp_negative_stock(self):
@@ -877,6 +1100,8 @@ class Command(BaseCommand):
         Fabric.objects.filter(current_stock__lt=0).update(current_stock=0)
         Trim.objects.filter(current_stock__lt=0).update(current_stock=0)
         FinishedGoods.objects.filter(quantity_in_stock__lt=0).update(quantity_in_stock=0)
+        SparePart.objects.filter(current_stock__lt=0).update(current_stock=0)
+        StationeryItem.objects.filter(current_stock__lt=0).update(current_stock=0)
 
     def print_summary(self):
         rows = [
@@ -887,6 +1112,10 @@ class Command(BaseCommand):
             ("Trims", Trim.objects.count()), ("Finished Goods", FinishedGoods.objects.count()),
             ("Dispatches", Dispatch.objects.count()), ("Stock Adjustments", StockAdjustment.objects.count()),
             ("Stock Movements", StockMovement.objects.count()),
+            ("Machines", Machine.objects.count()), ("Machine Events", MachineEvent.objects.count()),
+            ("Spare Parts", SparePart.objects.count()), ("Spare Part Consumptions", SparePartConsumption.objects.count()),
+            ("Stationery Items", StationeryItem.objects.count()), ("Stationery Consumptions", StationeryConsumption.objects.count()),
+            ("Supply Adjustments", SupplyAdjustment.objects.count()),
         ]
         for label, count in rows:
             self.stdout.write(f"  {label}: {count}")

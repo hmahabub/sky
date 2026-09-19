@@ -4,7 +4,9 @@ from .models import (
     TrimReceipt, TrimReceiptDetail,
     ProductionIssue, ProductionIssueDetail, FinishedGoods,
     FinishedGoodsProduction, Dispatch, DispatchDetail,
-    StockMovement, StockAdjustment, StockAdjustmentDetail
+    StockMovement, StockAdjustment, StockAdjustmentDetail,
+    Machine, MachineEvent, SparePart, SparePartConsumption,
+    StationeryItem, StationeryConsumption, SupplyAdjustment,
 )
 from datetime import date
 from decimal import Decimal
@@ -370,3 +372,197 @@ class FabricLotAdjustForm(forms.Form):
         super().__init__(*args, **kwargs)
         from apps.accounts.models import PurchaseOrder
         self.fields['purchase_order'].queryset = PurchaseOrder.objects.all()
+
+# ------------------------------------------------------------------ machines
+
+class MachineForm(forms.ModelForm):
+    class Meta:
+        model = Machine
+        fields = ['machine_code', 'machine_name', 'machine_type', 'brand', 'model_number',
+                 'serial_number', 'supplier', 'department', 'line_number', 'location',
+                 'purchase_date', 'purchase_cost', 'warranty_expiry', 'description']
+        widgets = {
+            'machine_code': forms.TextInput(attrs={'class': 'form-control'}),
+            'machine_name': forms.TextInput(attrs={'class': 'form-control'}),
+            'machine_type': forms.Select(attrs={'class': 'form-select'}),
+            'brand': forms.TextInput(attrs={'class': 'form-control'}),
+            'model_number': forms.TextInput(attrs={'class': 'form-control'}),
+            'serial_number': forms.TextInput(attrs={'class': 'form-control'}),
+            'supplier': forms.Select(attrs={'class': 'form-select'}),
+            'department': forms.Select(attrs={'class': 'form-select'}),
+            'line_number': forms.TextInput(attrs={'class': 'form-control'}),
+            'location': forms.TextInput(attrs={'class': 'form-control'}),
+            'purchase_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'purchase_cost': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'warranty_expiry': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+        }
+
+class MachineEventForm(forms.ModelForm):
+    class Meta:
+        model = MachineEvent
+        fields = ['event_type', 'event_date', 'description', 'cost', 'counterparty']
+        widgets = {
+            'event_type': forms.Select(attrs={'class': 'form-select'}),
+            'event_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+            'cost': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'counterparty': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Buyer / vendor / technician'}),
+        }
+
+class RejectMachineEventForm(forms.Form):
+    rejection_reason = forms.CharField(
+        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        help_text="Why this request is being rejected.",
+    )
+
+# --------------------------------------------------------------- spare parts
+
+class SparePartForm(forms.ModelForm):
+    class Meta:
+        model = SparePart
+        fields = ['part_name', 'category', 'compatible_machine_type', 'supplier',
+                 'unit', 'unit_price', 'min_stock', 'max_stock', 'description']
+        widgets = {
+            'part_name': forms.TextInput(attrs={'class': 'form-control'}),
+            'category': forms.Select(attrs={'class': 'form-select'}),
+            'compatible_machine_type': forms.Select(attrs={'class': 'form-select'}),
+            'supplier': forms.Select(attrs={'class': 'form-select'}),
+            'unit': forms.TextInput(attrs={'class': 'form-control'}),
+            'unit_price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'min_stock': forms.NumberInput(attrs={'class': 'form-control'}),
+            'max_stock': forms.NumberInput(attrs={'class': 'form-control'}),
+            'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+        }
+
+class SparePartStockInForm(forms.Form):
+    quantity = forms.IntegerField(
+        min_value=1,
+        widget=forms.NumberInput(attrs={'class': 'form-control'}),
+        help_text="How many units to add to stock.",
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        help_text="Optional - e.g. supplier/invoice reference.",
+    )
+
+class SparePartConsumptionForm(forms.Form):
+    department = forms.ModelChoiceField(
+        queryset=None,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+    )
+    machine = forms.ModelChoiceField(
+        queryset=None, required=False,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        help_text="Optional - which machine this part was used to repair.",
+    )
+    quantity = forms.IntegerField(
+        min_value=1,
+        widget=forms.NumberInput(attrs={'class': 'form-control'}),
+    )
+    consumption_date = forms.DateField(
+        initial=date.today,
+        widget=forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+    )
+    notes = forms.CharField(required=False, widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from apps.hr.models import Department
+        self.fields['department'].queryset = Department.objects.all()
+        self.fields['machine'].queryset = Machine.objects.exclude(status__in=['sold', 'scrapped'])
+
+# ---------------------------------------------------------------- stationery
+
+class StationeryItemForm(forms.ModelForm):
+    class Meta:
+        model = StationeryItem
+        fields = ['item_name', 'category', 'unit', 'unit_price', 'min_stock', 'max_stock', 'description']
+        widgets = {
+            'item_name': forms.TextInput(attrs={'class': 'form-control'}),
+            'category': forms.Select(attrs={'class': 'form-select'}),
+            'unit': forms.TextInput(attrs={'class': 'form-control'}),
+            'unit_price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'min_stock': forms.NumberInput(attrs={'class': 'form-control'}),
+            'max_stock': forms.NumberInput(attrs={'class': 'form-control'}),
+            'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+        }
+
+class StationeryStockInForm(forms.Form):
+    quantity = forms.IntegerField(
+        min_value=1,
+        widget=forms.NumberInput(attrs={'class': 'form-control'}),
+        help_text="How many units to add to stock.",
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        help_text="Optional - e.g. supplier/invoice reference.",
+    )
+
+class StationeryConsumptionForm(forms.Form):
+    department = forms.ModelChoiceField(
+        queryset=None,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+    )
+    quantity = forms.IntegerField(
+        min_value=1,
+        widget=forms.NumberInput(attrs={'class': 'form-control'}),
+    )
+    consumption_date = forms.DateField(
+        initial=date.today,
+        widget=forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+    )
+    notes = forms.CharField(required=False, widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from apps.hr.models import Department
+        self.fields['department'].queryset = Department.objects.all()
+
+# ------------------------------------------------------------- supply adjustment
+
+class SupplyAdjustmentForm(forms.ModelForm):
+    class Meta:
+        model = SupplyAdjustment
+        fields = ['adjustment_type', 'direction', 'spare_part', 'stationery_item',
+                 'adjustment_date', 'quantity', 'reason', 'notes']
+        widgets = {
+            'adjustment_type': forms.Select(attrs={'class': 'form-select'}),
+            'direction': forms.Select(attrs={'class': 'form-select'}),
+            'spare_part': forms.Select(attrs={'class': 'form-select'}),
+            'stationery_item': forms.Select(attrs={'class': 'form-select'}),
+            'adjustment_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'quantity': forms.NumberInput(attrs={'class': 'form-control', 'min': '1'}),
+            'reason': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+            'notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        }
+
+    def clean(self):
+        cleaned_data = super().clean()
+        spare_part = cleaned_data.get('spare_part')
+        stationery_item = cleaned_data.get('stationery_item')
+        quantity = cleaned_data.get('quantity')
+        direction = cleaned_data.get('direction')
+
+        targets = [t for t in [spare_part, stationery_item] if t]
+        if len(targets) == 0:
+            raise forms.ValidationError("Select a spare part or a stationery item to adjust.")
+        if len(targets) > 1:
+            raise forms.ValidationError("Select only one of spare part or stationery item per adjustment.")
+
+        if direction == 'decrease' and quantity is not None:
+            current_stock = targets[0].current_stock
+            if quantity > current_stock:
+                raise forms.ValidationError(
+                    f"Can't decrease stock by {quantity}: only {current_stock} currently in stock."
+                )
+
+        return cleaned_data
+
+class RejectSupplyAdjustmentForm(forms.Form):
+    rejection_reason = forms.CharField(
+        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        help_text="Why this adjustment is being rejected.",
+    )

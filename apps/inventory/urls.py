@@ -62,4 +62,35 @@ urlpatterns = [
     path('reports/', views.stock_report, name='stock_report'),
     path('reports/export/excel/', views.stock_report_export_excel, name='stock_report_export_excel'),
     path('reports/export/pdf/', views.stock_report_export_pdf, name='stock_report_export_pdf'),
+
+    # Machines
+    path('machines/', views.machine_list, name='machine_list'),
+    path('machines/add/', views.add_machine, name='add_machine'),
+    path('machines/<int:pk>/', views.machine_detail, name='machine_detail'),
+    path('machines/<int:pk>/edit/', views.edit_machine, name='edit_machine'),
+    path('machines/<int:pk>/events/add/', views.add_machine_event, name='add_machine_event'),
+    path('machines/<int:pk>/events/<int:event_pk>/approve/', views.approve_machine_event, name='approve_machine_event'),
+    path('machines/<int:pk>/events/<int:event_pk>/reject/', views.reject_machine_event, name='reject_machine_event'),
+
+    # Spare Parts
+    path('spare-parts/', views.spare_part_list, name='spare_part_list'),
+    path('spare-parts/add/', views.add_spare_part, name='add_spare_part'),
+    path('spare-parts/<int:pk>/edit/', views.edit_spare_part, name='edit_spare_part'),
+    path('spare-parts/<int:pk>/ledger/', views.spare_part_stock_ledger, name='spare_part_stock_ledger'),
+    path('spare-parts/<int:pk>/add-stock/', views.add_spare_part_stock, name='add_spare_part_stock'),
+    path('spare-parts/<int:pk>/consume/', views.record_spare_part_consumption, name='record_spare_part_consumption'),
+
+    # Stationery
+    path('stationery/', views.stationery_list, name='stationery_list'),
+    path('stationery/add/', views.add_stationery_item, name='add_stationery_item'),
+    path('stationery/<int:pk>/edit/', views.edit_stationery_item, name='edit_stationery_item'),
+    path('stationery/<int:pk>/ledger/', views.stationery_stock_ledger, name='stationery_stock_ledger'),
+    path('stationery/<int:pk>/add-stock/', views.add_stationery_stock, name='add_stationery_stock'),
+    path('stationery/<int:pk>/consume/', views.record_stationery_consumption, name='record_stationery_consumption'),
+
+    # Supply Adjustments (Spare Parts + Stationery)
+    path('supply-adjustments/', views.supply_adjustments, name='supply_adjustments'),
+    path('supply-adjustments/add/', views.add_supply_adjustment, name='add_supply_adjustment'),
+    path('supply-adjustments/<int:pk>/approve/', views.approve_supply_adjustment, name='approve_supply_adjustment'),
+    path('supply-adjustments/<int:pk>/reject/', views.reject_supply_adjustment, name='reject_supply_adjustment'),
 ]

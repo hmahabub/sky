@@ -503,6 +503,8 @@ class StockMovement(models.Model):
     fabric_roll = models.ForeignKey(FabricRoll, on_delete=models.SET_NULL, null=True, blank=True, related_name='movements')
     trim = models.ForeignKey(Trim, on_delete=models.SET_NULL, null=True, blank=True, related_name='movements')
     finished_goods = models.ForeignKey(FinishedGoods, on_delete=models.SET_NULL, null=True, blank=True, related_name='movements')
+    spare_part = models.ForeignKey('SparePart', on_delete=models.SET_NULL, null=True, blank=True, related_name='movements')
+    stationery_item = models.ForeignKey('StationeryItem', on_delete=models.SET_NULL, null=True, blank=True, related_name='movements')
     # Signed: positive = added to stock, negative = removed from stock.
     quantity = models.DecimalField(max_digits=10, decimal_places=2)
     from_location = models.CharField(max_length=100, blank=True)
@@ -605,3 +607,318 @@ class StockAdjustmentDetail(models.Model):
 
     def __str__(self):
         return f"{self.stock_adjustment.adjustment_number} - {self.fabric_roll.lot_number} ({self.quantity})"
+
+class Machine(models.Model):
+    """Garment-factory machinery asset register."""
+    MACHINE_TYPES = [
+        ('sewing_single_needle', 'Sewing - Single Needle Lockstitch'),
+        ('sewing_overlock', 'Sewing - Overlock / Serger'),
+        ('sewing_flatlock', 'Sewing - Flatlock / Interlock'),
+        ('sewing_bartack', 'Sewing - Bartack'),
+        ('sewing_buttonhole', 'Sewing - Buttonhole'),
+        ('sewing_button_attach', 'Sewing - Button Attach'),
+        ('sewing_kansai', 'Sewing - Kansai (Multi-needle)'),
+        ('cutting_straight_knife', 'Cutting - Straight Knife'),
+        ('cutting_band_knife', 'Cutting - Band Knife'),
+        ('fusing_press', 'Fusing Press'),
+        ('embroidery', 'Embroidery'),
+        ('washing', 'Washing Machine'),
+        ('dryer', 'Dryer'),
+        ('boiler', 'Boiler'),
+        ('generator', 'Generator'),
+        ('compressor', 'Air Compressor'),
+        ('iron_press', 'Iron / Steam Press'),
+        ('needle_detector', 'Needle Detector'),
+        ('other', 'Other'),
+    ]
+
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('idle', 'Idle'),
+        ('under_maintenance', 'Under Maintenance'),
+        ('broken_down', 'Broken Down'),
+        ('sold', 'Sold'),
+        ('scrapped', 'Scrapped'),
+        ('transferred', 'Transferred'),
+    ]
+
+    machine_code = models.CharField(max_length=50, unique=True)
+    machine_name = models.CharField(max_length=200)
+    machine_type = models.CharField(max_length=30, choices=MACHINE_TYPES, default='other')
+    brand = models.CharField(max_length=100, blank=True)
+    model_number = models.CharField(max_length=100, blank=True)
+    serial_number = models.CharField(max_length=100, blank=True)
+    supplier = models.ForeignKey('accounts.Supplier', on_delete=models.SET_NULL, null=True, blank=True, related_name='machines')
+    department = models.ForeignKey('hr.Department', on_delete=models.SET_NULL, null=True, blank=True, related_name='machines')
+    line_number = models.CharField(max_length=50, blank=True, help_text="e.g. Line-3")
+    location = models.CharField(max_length=200, blank=True, help_text="e.g. Floor 2, Line 3, Station 12")
+    purchase_date = models.DateField(null=True, blank=True)
+    purchase_cost = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    warranty_expiry = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    description = models.TextField(blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='machines_added')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.machine_code} - {self.machine_name}"
+
+    @property
+    def is_disposed(self):
+        return self.status in ('sold', 'scrapped')
+
+    class Meta:
+        ordering = ['machine_code']
+
+class MachineEvent(models.Model):
+    """
+    Status-change ledger for a Machine - the equivalent of StockMovement,
+    but for a discrete asset instead of a fungible quantity. Sold/Scrapped
+    events need superuser approval before Machine.status actually changes
+    (mirrors Dispatch.shipment_approval exactly); every other event type
+    applies immediately.
+    """
+    EVENT_TYPES = [
+        ('breakdown', 'Breakdown Reported'),
+        ('repair_started', 'Repair Started'),
+        ('repair_completed', 'Repair Completed'),
+        ('maintenance', 'Routine Maintenance'),
+        ('relocated', 'Relocated'),
+        ('sold', 'Sold'),
+        ('scrapped', 'Scrapped'),
+        ('other', 'Other'),
+    ]
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending Approval'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    machine = models.ForeignKey(Machine, on_delete=models.CASCADE, related_name='events')
+    event_type = models.CharField(max_length=20, choices=EVENT_TYPES)
+    event_date = models.DateField()
+    description = models.TextField(blank=True)
+    cost = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, help_text="Repair cost or sale price, if applicable")
+    counterparty = models.CharField(max_length=200, blank=True, help_text="Buyer, vendor or technician name")
+    # Only 'sold'/'scrapped' events are ever created as 'pending' - every
+    # other event type is created straight as 'approved' since it doesn't
+    # gate anything (see add_machine_event).
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='approved')
+    rejection_reason = models.TextField(blank=True)
+    approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_machine_events')
+    approved_date = models.DateField(null=True, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='machine_events_logged')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.machine.machine_code} - {self.get_event_type_display()} ({self.event_date})"
+
+    class Meta:
+        ordering = ['-event_date', '-created_at']
+
+class SparePart(models.Model):
+    """Machine spare parts inventory (needles, motors, belts, etc.)."""
+    CATEGORY_CHOICES = [
+        ('needle', 'Needle'),
+        ('motor', 'Motor'),
+        ('belt', 'Belt'),
+        ('bobbin', 'Bobbin'),
+        ('presser_foot', 'Presser Foot'),
+        ('bearing', 'Bearing'),
+        ('gear', 'Gear'),
+        ('electronic_board', 'Electronic Board / PCB'),
+        ('blade', 'Blade / Knife'),
+        ('other', 'Other'),
+    ]
+
+    part_name = models.CharField(max_length=200)
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='other')
+    compatible_machine_type = models.CharField(max_length=30, choices=Machine.MACHINE_TYPES, blank=True)
+    supplier = models.ForeignKey('accounts.Supplier', on_delete=models.SET_NULL, null=True, blank=True, related_name='spare_parts')
+    unit = models.CharField(max_length=20, default='pcs')
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    current_stock = models.IntegerField(default=0)
+    min_stock = models.IntegerField(default=0)
+    max_stock = models.IntegerField(default=99999)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def part_code(self):
+        return f"SP-{self.pk:05d}"
+
+    def __str__(self):
+        return f"{self.part_code} - {self.part_name}"
+
+    @property
+    def is_low_stock(self):
+        return self.current_stock <= self.min_stock
+
+    @property
+    def stock_status(self):
+        if self.current_stock <= self.min_stock:
+            return 'low'
+        elif self.current_stock >= self.max_stock:
+            return 'overstock'
+        else:
+            return 'normal'
+
+    class Meta:
+        ordering = ['part_name']
+
+class SparePartConsumption(models.Model):
+    """
+    One department's use of a spare part, optionally against a specific
+    Machine/MachineEvent (repair). unit_price_at_consumption is snapshotted
+    at issue time so a later costing report doesn't need historical price
+    lookups.
+    """
+    spare_part = models.ForeignKey(SparePart, on_delete=models.CASCADE, related_name='consumptions')
+    department = models.ForeignKey('hr.Department', on_delete=models.PROTECT, related_name='spare_part_consumptions')
+    machine = models.ForeignKey(Machine, on_delete=models.SET_NULL, null=True, blank=True, related_name='spare_part_consumptions')
+    machine_event = models.ForeignKey(MachineEvent, on_delete=models.SET_NULL, null=True, blank=True, related_name='spare_part_consumptions')
+    quantity = models.IntegerField(validators=[MinValueValidator(1)])
+    unit_price_at_consumption = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    consumption_date = models.DateField()
+    notes = models.TextField(blank=True)
+    issued_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='spare_part_consumptions')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def total_cost(self):
+        return self.quantity * self.unit_price_at_consumption
+
+    def __str__(self):
+        return f"{self.spare_part.part_name} x{self.quantity} - {self.department.name}"
+
+    class Meta:
+        ordering = ['-consumption_date']
+
+class StationeryItem(models.Model):
+    """Office/stationery supplies inventory."""
+    CATEGORY_CHOICES = [
+        ('paper', 'Paper'),
+        ('writing', 'Writing Materials'),
+        ('printing', 'Printing / Toner'),
+        ('filing', 'Filing & Organization'),
+        ('cleaning', 'Cleaning Supplies'),
+        ('other', 'Other'),
+    ]
+
+    item_name = models.CharField(max_length=200)
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='other')
+    unit = models.CharField(max_length=20, default='pcs')
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    current_stock = models.IntegerField(default=0)
+    min_stock = models.IntegerField(default=0)
+    max_stock = models.IntegerField(default=99999)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def item_code(self):
+        return f"ST-{self.pk:05d}"
+
+    def __str__(self):
+        return f"{self.item_code} - {self.item_name}"
+
+    @property
+    def is_low_stock(self):
+        return self.current_stock <= self.min_stock
+
+    @property
+    def stock_status(self):
+        if self.current_stock <= self.min_stock:
+            return 'low'
+        elif self.current_stock >= self.max_stock:
+            return 'overstock'
+        else:
+            return 'normal'
+
+    class Meta:
+        ordering = ['item_name']
+
+class StationeryConsumption(models.Model):
+    """One department's use of a stationery item - mirrors SparePartConsumption."""
+    stationery_item = models.ForeignKey(StationeryItem, on_delete=models.CASCADE, related_name='consumptions')
+    department = models.ForeignKey('hr.Department', on_delete=models.PROTECT, related_name='stationery_consumptions')
+    quantity = models.IntegerField(validators=[MinValueValidator(1)])
+    unit_price_at_consumption = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    consumption_date = models.DateField()
+    notes = models.TextField(blank=True)
+    issued_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='stationery_consumptions')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def total_cost(self):
+        return self.quantity * self.unit_price_at_consumption
+
+    def __str__(self):
+        return f"{self.stationery_item.item_name} x{self.quantity} - {self.department.name}"
+
+    class Meta:
+        ordering = ['-consumption_date']
+
+class SupplyAdjustment(models.Model):
+    """
+    Stock correction for a SparePart or StationeryItem - the equivalent of
+    StockAdjustment, kept as its own model since these items are simpler
+    (no lot tracking) and shouldn't inherit Fabric-lot machinery they'd
+    never use. Same pending/approved/rejected approval gate.
+    """
+    ADJUSTMENT_TYPES = [
+        ('damage', 'Damage Write-off'),
+        ('expired_obsolete', 'Expired / Obsolete'),
+        ('recount', 'Recount Adjustment'),
+        ('other', 'Other'),
+    ]
+
+    DIRECTION_CHOICES = [
+        ('increase', 'Increase Stock'),
+        ('decrease', 'Decrease Stock'),
+    ]
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending Approval'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    adjustment_type = models.CharField(max_length=20, choices=ADJUSTMENT_TYPES)
+    direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES, default='decrease')
+    spare_part = models.ForeignKey(SparePart, on_delete=models.SET_NULL, null=True, blank=True, related_name='adjustments')
+    stationery_item = models.ForeignKey(StationeryItem, on_delete=models.SET_NULL, null=True, blank=True, related_name='adjustments')
+    adjustment_date = models.DateField()
+    quantity = models.IntegerField(validators=[MinValueValidator(1)])
+    reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_supply_adjustments')
+    approved_date = models.DateField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_supply_adjustments')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def adjustment_number(self):
+        if not self.pk:
+            return "SUA-PENDING"
+        return f"SUA-{self.adjustment_date.strftime('%y%m%d')}-{self.pk:05d}"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        targets = [t for t in [self.spare_part_id, self.stationery_item_id] if t]
+        if len(targets) != 1:
+            raise ValidationError("Select exactly one of Spare Part or Stationery Item.")
+
+    def __str__(self):
+        return f"{self.adjustment_number} - {self.adjustment_type}"
+
+    class Meta:
+        ordering = ['-adjustment_date']
