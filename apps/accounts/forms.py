@@ -1,36 +1,12 @@
 from django import forms
 from django.contrib.auth.models import User
 from .models import (
-    ChartOfAccount, Buyer, Supplier, Style, PurchaseOrder, PurchaseOrderItem,
-    SalesInvoice, SalesInvoiceItem, Payment, JournalEntry, JournalDetail,
-    CostSheet, BankAccount, BankTransaction
+    Buyer, Supplier, Project, PurchaseOrder, PurchaseOrderItem,
+    SalesInvoice, SalesInvoiceItem, Payment,
+    CostSheet, BankAccount, BankTransaction,
+    LetterOfCredit, LCPayment, LCLoan, Cost,
 )
 from datetime import date
-
-class ChartOfAccountForm(forms.ModelForm):
-    class Meta:
-        model = ChartOfAccount
-        fields = ['account_code', 'account_name', 'account_type', 'account_category', 
-                 'parent_account', 'opening_balance', 'description']
-        widgets = {
-            'account_code': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., 1010'}),
-            'account_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Account Name'}),
-            'account_type': forms.Select(attrs={'class': 'form-select'}),
-            'account_category': forms.Select(attrs={'class': 'form-select'}),
-            'parent_account': forms.Select(attrs={'class': 'form-select'}),
-            'opening_balance': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-            'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
-        }
-    
-    def clean_account_code(self):
-        code = self.cleaned_data.get('account_code')
-        if ChartOfAccount.objects.filter(account_code=code).exists():
-            if self.instance and self.instance.pk:
-                if self.instance.account_code != code:
-                    raise forms.ValidationError('Account code already exists.')
-            else:
-                raise forms.ValidationError('Account code already exists.')
-        return code
 
 class BuyerForm(forms.ModelForm):
     class Meta:
@@ -65,25 +41,25 @@ class SupplierForm(forms.ModelForm):
             'credit_days': forms.NumberInput(attrs={'class': 'form-control'}),
         }
 
-class StyleForm(forms.ModelForm):
+class ProjectForm(forms.ModelForm):
     class Meta:
-        model = Style
-        fields = ['style_number', 'buyer', 'description', 'order_quantity', 
-                 'unit_price', 'cm_charge', 'agent_commission', 'lc_number', 
-                 'lc_date', 'order_date', 'delivery_date', 'status']
+        model = Project
+        fields = ['project_number', 'buyer', 'description', 'order_quantity',
+                 'unit_price', 'currency', 'cm_charge', 'agent_commission',
+                 'order_date', 'delivery_date', 'status', 'remarks']
         widgets = {
-            'style_number': forms.TextInput(attrs={'class': 'form-control'}),
+            'project_number': forms.TextInput(attrs={'class': 'form-control'}),
             'buyer': forms.Select(attrs={'class': 'form-select'}),
             'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
             'order_quantity': forms.NumberInput(attrs={'class': 'form-control'}),
             'unit_price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'currency': forms.TextInput(attrs={'class': 'form-control'}),
             'cm_charge': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
             'agent_commission': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-            'lc_number': forms.TextInput(attrs={'class': 'form-control'}),
-            'lc_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'order_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'delivery_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'status': forms.Select(attrs={'class': 'form-select'}),
+            'remarks': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
         }
 
 class PurchaseOrderForm(forms.ModelForm):
@@ -107,7 +83,7 @@ class SalesInvoiceForm(forms.ModelForm):
     class Meta:
         model = SalesInvoice
         fields = ['invoice_number', 'style', 'buyer', 'invoice_date', 'due_date',
-                 'amount', 'discount', 'tax', 'lc_number', 'exchange_rate', 
+                 'amount', 'discount', 'tax', 'letter_of_credit', 'exchange_rate',
                  'currency', 'shipping_terms', 'shipping_cost', 'notes']
         widgets = {
             'invoice_number': forms.TextInput(attrs={'class': 'form-control'}),
@@ -118,7 +94,7 @@ class SalesInvoiceForm(forms.ModelForm):
             'amount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
             'discount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
             'tax': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-            'lc_number': forms.TextInput(attrs={'class': 'form-control'}),
+            'letter_of_credit': forms.Select(attrs={'class': 'form-select'}),
             'exchange_rate': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
             'currency': forms.TextInput(attrs={'class': 'form-control'}),
             'shipping_terms': forms.TextInput(attrs={'class': 'form-control'}),
@@ -158,29 +134,6 @@ class PaymentForm(forms.ModelForm):
                 raise forms.ValidationError('For payable payments, both Supplier and Purchase Order are required.')
         
         return cleaned_data
-
-class JournalEntryForm(forms.ModelForm):
-    class Meta:
-        model = JournalEntry
-        fields = ['entry_number', 'journal_type', 'entry_date', 'description', 'reference']
-        widgets = {
-            'entry_number': forms.TextInput(attrs={'class': 'form-control'}),
-            'journal_type': forms.Select(attrs={'class': 'form-select'}),
-            'entry_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
-            'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
-            'reference': forms.TextInput(attrs={'class': 'form-control'}),
-        }
-
-class JournalDetailForm(forms.ModelForm):
-    class Meta:
-        model = JournalDetail
-        fields = ['account', 'debit_amount', 'credit_amount', 'notes']
-        widgets = {
-            'account': forms.Select(attrs={'class': 'form-select'}),
-            'debit_amount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-            'credit_amount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-            'notes': forms.TextInput(attrs={'class': 'form-control'}),
-        }
 
 class CostSheetForm(forms.ModelForm):
     class Meta:
@@ -233,4 +186,65 @@ class BankTransactionForm(forms.ModelForm):
             'transaction_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'reference': forms.TextInput(attrs={'class': 'form-control'}),
             'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+        }
+
+class LetterOfCreditForm(forms.ModelForm):
+    class Meta:
+        model = LetterOfCredit
+        fields = ['lc_number', 'project', 'lc_date', 'bank_name', 'lc_amount',
+                 'currency', 'expiry_date', 'status', 'remarks']
+        widgets = {
+            'lc_number': forms.TextInput(attrs={'class': 'form-control'}),
+            'project': forms.Select(attrs={'class': 'form-select'}),
+            'lc_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'bank_name': forms.TextInput(attrs={'class': 'form-control'}),
+            'lc_amount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'currency': forms.TextInput(attrs={'class': 'form-control'}),
+            'expiry_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'status': forms.Select(attrs={'class': 'form-select'}),
+            'remarks': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        }
+
+class LCPaymentForm(forms.ModelForm):
+    class Meta:
+        model = LCPayment
+        fields = ['payment_date', 'amount', 'bank_name', 'reference', 'remarks']
+        widgets = {
+            'payment_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'amount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'bank_name': forms.TextInput(attrs={'class': 'form-control'}),
+            'reference': forms.TextInput(attrs={'class': 'form-control'}),
+            'remarks': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        }
+
+class LCLoanForm(forms.ModelForm):
+    class Meta:
+        model = LCLoan
+        fields = ['loan_date', 'bank_name', 'loan_amount', 'interest',
+                 'other_charges', 'repaid_amount', 'remarks']
+        widgets = {
+            'loan_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'bank_name': forms.TextInput(attrs={'class': 'form-control'}),
+            'loan_amount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'interest': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'other_charges': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'repaid_amount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'remarks': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        }
+
+class CostForm(forms.ModelForm):
+    class Meta:
+        model = Cost
+        fields = ['project', 'purchase_order', 'cost_type', 'cost_date', 'description',
+                 'amount', 'currency', 'payment_status', 'remarks']
+        widgets = {
+            'project': forms.Select(attrs={'class': 'form-select'}),
+            'purchase_order': forms.Select(attrs={'class': 'form-select'}),
+            'cost_type': forms.Select(attrs={'class': 'form-select'}),
+            'cost_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'description': forms.TextInput(attrs={'class': 'form-control'}),
+            'amount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'currency': forms.TextInput(attrs={'class': 'form-control'}),
+            'payment_status': forms.Select(attrs={'class': 'form-select'}),
+            'remarks': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
         }

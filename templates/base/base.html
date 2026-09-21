@@ -13,11 +13,75 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
+
+        html {
+            font-size: 80%;
+        }
+
         body {
             font-family: 'Inter', sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
+        }
+
+        /* Turn off the row-highlight-on-hover animation for every table */
+        .table-hover > tbody > tr:hover > * {
+            --bs-table-accent-bg: transparent !important;
+            background-color: transparent !important;
+            color: inherit !important;
+        }
+
+        .table-print-btn {
+            font-size: 0.75rem;
+        }
+
+        #table-print-area {
+            display: none;
+        }
+
+        @media print {
+            body.printing-table > *:not(#table-print-area) {
+                display: none !important;
+            }
+            body.printing-table #table-print-area {
+                display: block !important;
+                padding: 20px;
+            }
+            #print-letterhead {
+                text-align: center;
+                border-bottom: 2px solid #1e293b;
+                padding-bottom: 10px;
+                margin-bottom: 16px;
+            }
+            #print-letterhead .print-company-name {
+                font-size: 20px;
+                font-weight: 700;
+                letter-spacing: 0.02em;
+            }
+            #print-letterhead .print-company-tagline {
+                font-size: 12px;
+                font-style: italic;
+                margin-top: 2px;
+            }
+            #print-letterhead .print-company-address {
+                font-size: 11px;
+                color: #333;
+            }
+            #table-print-area table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            #table-print-area th,
+            #table-print-area td {
+                border: 1px solid #999;
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            #table-print-area .btn,
+            #table-print-area .btn-group,
+            #table-print-area a[href] {
+                display: none !important;
+            }
         }
         
         .sidebar {
@@ -44,7 +108,7 @@
         }
         
         .sidebar-header h3 {
-            font-size: 24px;
+            font-size: 19px;
             font-weight: 700;
             margin: 0;
             background: linear-gradient(135deg, #667eea, #764ba2);
@@ -53,7 +117,7 @@
         }
         
         .sidebar-header p {
-            font-size: 12px;
+            font-size: 10px;
             margin: 5px 0 0;
             opacity: 0.7;
         }
@@ -63,7 +127,7 @@
         }
         
         .menu-item {
-            font-size: 12px;
+            font-size: 10px;
             padding: 12px 25px;
             margin: 5px 0;
             transition: all 0.3s;
@@ -93,7 +157,7 @@
         }
         
         .content-wrapper {
-            margin-left: 280px;
+            margin-left: 220px;
             padding: 20px;
         }
         
@@ -109,14 +173,13 @@
             background: white;
             border-radius: 15px;
             padding: 20px;
+            margin-top: 10px;
             margin-bottom: 20px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             transition: transform 0.3s;
         }
         
-        .stat-card:hover {
-            transform: translateY(-5px);
-        }
+        
         
         .card-icon {
             width: 50px;
@@ -125,7 +188,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: 16px;
         }
         
         .btn-gradient {
@@ -145,7 +208,7 @@
         }
 
         .sidebar-menu .collapse a {
-            font-size: 12px;
+            font-size: 10px;
             opacity: 0.9;
         }
 
@@ -176,12 +239,15 @@
             <p>Enterprise Resource Planning</p>
         </div>
         <div class="sidebar-menu">
-            <div class="menu-item {% if active == 'dashboard' %}active{% endif %}">
+            <!-- Main (Accounts-driven) dashboard hidden from nav for now -
+                 Warehouse/Inventory is the primary module in use; see
+                 apps/dashboard/views.py, which now redirects '/' there. -->
+            <!-- <div class="menu-item {% if active == 'dashboard' %}active{% endif %}">
                 <a href="{% url 'dashboard:dashboard' %}">
                     <i class="fas fa-tachometer-alt"></i>
                     <span>Dashboard</span>
                 </a>
-            </div>
+            </div> -->
 
             <!-- <div class="menu-item">
                 <a data-bs-toggle="collapse" href="#hrMenu" role="button"
@@ -274,12 +340,16 @@
                 </div>
             </div> -->
 
+            <!-- Accounting hidden from nav for now - Warehouse/Inventory is
+                 the primary module in use; the views/URLs still work if
+                 linked to directly. -->
+            <!-- {% if user.is_superuser %}
             <div class="menu-item">
                 <a data-bs-toggle="collapse" href="#accountsMenu" role="button"
                    aria-expanded="{% if active == 'accounts' %}true{% else %}false{% endif %}"
                    aria-controls="accountsMenu">
                     <i class="fas fa-book"></i>
-                    <span>Chart of Accounts</span>
+                    <span>Accounting</span>
                     <i class="fas fa-chevron-down float-end mt-1"></i>
                 </a>
 
@@ -287,54 +357,66 @@
                     <div class="ps-4 mt-2">
 
                         <a class="d-block py-2 text-white text-decoration-none"
-                           href="{% url 'accounts:chart_of_accounts' %}">
-                            <i class="fas fa-list me-2"></i> View All Accounts
+                           href="{% url 'accounts:accounts_dashboard' %}">
+                            <i class="fas fa-tachometer-alt me-2"></i> Dashboard
                         </a>
-
 
                         <a class="d-block py-2 text-white text-decoration-none"
                            href="{% url 'accounts:buyers_list' %}">
-                            <i class="fas fa-user-tie me-2"></i> All Buyers
+                            <i class="fas fa-user-tie me-2"></i> Buyers
                         </a>
 
                         <a class="d-block py-2 text-white text-decoration-none"
                            href="{% url 'accounts:suppliers_list' %}">
-                            <i class="fas fa-truck me-2"></i> All Suppliers
+                            <i class="fas fa-truck me-2"></i> Suppliers
                         </a>
 
                         <a class="d-block py-2 text-white text-decoration-none"
-                           href="{% url 'accounts:styles_list' %}">
-                            <i class="fas fa-tshirt me-2"></i> All Styles
+                           href="{% url 'accounts:projects_list' %}">
+                            <i class="fas fa-tshirt me-2"></i> Projects
                         </a>
 
+                        <a class="d-block py-2 text-white text-decoration-none"
+                           href="{% url 'accounts:purchase_orders_list' %}">
+                            <i class="fas fa-file-invoice me-2"></i> Purchase Orders
+                        </a>
 
                         <a class="d-block py-2 text-white text-decoration-none"
                            href="{% url 'accounts:invoices_list' %}">
-                            <i class="fas fa-file-invoice me-2"></i> All Invoices
+                            <i class="fas fa-file-invoice-dollar me-2"></i> Invoices
                         </a>
 
 
                         <a class="d-block py-2 text-white text-decoration-none"
                            href="{% url 'accounts:payments_list' %}">
-                            <i class="fas fa-hand-holding-usd me-2"></i> All Payments
+                            <i class="fas fa-hand-holding-usd me-2"></i> Payments
                         </a>
 
 
                         <a class="d-block py-2 text-white text-decoration-none"
-                           href="{% url 'accounts:journal_entries' %}">
-                            <i class="fas fa-book-open me-2"></i> All Journal Entries
+                           href="{% url 'accounts:lc_list' %}">
+                            <i class="fas fa-file-contract me-2"></i> Letters of Credit
                         </a>
 
+                        <a class="d-block py-2 text-white text-decoration-none"
+                           href="{% url 'accounts:costs_list' %}">
+                            <i class="fas fa-receipt me-2"></i> Costs
+                        </a>
 
                         <a class="d-block py-2 text-white text-decoration-none"
                            href="{% url 'accounts:cost_sheets' %}">
-                            <i class="fas fa-calculator me-2"></i> All Cost Sheets
+                            <i class="fas fa-calculator me-2"></i> Cost Sheets
                         </a>
 
 
                         <a class="d-block py-2 text-white text-decoration-none"
                            href="{% url 'accounts:banks_list' %}">
-                            <i class="fas fa-university me-2"></i> All Banks
+                            <i class="fas fa-university me-2"></i> Banks
+                        </a>
+
+                        <a class="d-block py-2 text-white text-decoration-none"
+                           href="{% url 'accounts:bank_transactions_list' %}">
+                            <i class="fas fa-exchange-alt me-2"></i> Bank Transactions
                         </a>
 
 
@@ -346,6 +428,7 @@
                     </div>
                 </div>
             </div>
+            {% endif %} -->
 
         <div class="menu-item">
             <a data-bs-toggle="collapse" href="#inventoryMenu" role="button"
@@ -363,6 +446,24 @@
                        href="{% url 'inventory:inventory_dashboard' %}">
                         <i class="fas fa-tachometer-alt me-2"></i> Dashboard
                     </a>
+
+                    <div class="text-uppercase small text-white-50 mt-3 mb-1 ps-1" style="letter-spacing: 0.05em;">Temporary Merch. Module</div>
+                    <a class="d-block py-2 text-white text-decoration-none"
+                       href="{% url 'accounts:buyers_list' %}">
+                        <i class="fas fa-user-tie me-2"></i> Buyers
+                    </a>
+
+                    <a class="d-block py-2 text-white text-decoration-none"
+                       href="{% url 'accounts:suppliers_list' %}">
+                        <i class="fas fa-truck me-2"></i> Suppliers
+                    </a>
+
+                    <a class="d-block py-2 text-white text-decoration-none"
+                       href="{% url 'accounts:projects_list' %}">
+                        <i class="fas fa-tshirt me-2"></i> Projects
+                    </a>
+
+                    <div class="text-uppercase small text-white-50 mt-3 mb-1 ps-1" style="letter-spacing: 0.05em;">Material Inventory</div>
 
                     <a class="d-block py-2 text-white text-decoration-none"
                        href="{% url 'inventory:fabric_list' %}">
@@ -459,6 +560,131 @@
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Adds a "Print" button above every data table (any table inside a
+        // .table-responsive wrapper) that prints just that table's content.
+        // Uses an in-page print area + @media print instead of a popup
+        // window, so it isn't affected by popup blockers.
+        function printTable(table) {
+            var printArea = document.getElementById('table-print-area');
+            if (!printArea) {
+                printArea = document.createElement('div');
+                printArea.id = 'table-print-area';
+                document.body.appendChild(printArea);
+            }
+            var title = document.title.replace(/ - SkyTex ERP/g, '').replace(/^SkyTex ERP\s*-?\s*/, '');
+            var letterhead =
+                '<div id="print-letterhead">' +
+                    '<div class="print-company-name">SkyTex Apparel Limited</div>' +
+                    '<div class="print-company-tagline">(100% Export Oriented Readymade Garments Factory)</div>' +
+                    '<div class="print-company-address">Industrial Shade 01, Inside Modern National Cotton Mill Ltd.,</div>' +
+                    '<div class="print-company-address">5-B, Fouzdarhat Industrial Area, Jafrabad, Sitakund, Chattogram</div>' +
+                '</div>';
+            printArea.innerHTML = letterhead + '<h4>' + title + '</h4>' + table.outerHTML;
+            document.body.classList.add('printing-table');
+            window.print();
+        }
+
+        window.addEventListener('afterprint', function () {
+            document.body.classList.remove('printing-table');
+        });
+
+        // Paginated list pages only render one page's worth of rows (20) into
+        // the table, so printing it as-is only prints that page. This fetches
+        // every other page of the same list (same URL/filters, just a
+        // different ?page=) and merges all their rows into one table before
+        // printing, so the result covers the whole list, not just the page
+        // currently on screen.
+        function findPaginationMaxPage(wrapper) {
+            var container = wrapper.closest('.stat-card') || document;
+            var pagination = container.querySelector('.pagination');
+            if (!pagination) return 1;
+            var max = 1;
+            pagination.querySelectorAll('a.page-link[href*="page="]').forEach(function (a) {
+                var url = new URL(a.getAttribute('href'), window.location.href);
+                var p = parseInt(url.searchParams.get('page'), 10);
+                if (!isNaN(p) && p > max) max = p;
+            });
+            return max;
+        }
+
+        async function printAllPages(wrapper, table, btn) {
+            var maxPage = findPaginationMaxPage(wrapper);
+            var wrapperIndex = Array.prototype.indexOf.call(
+                document.querySelectorAll('.table-responsive'), wrapper
+            );
+            var originalLabel = btn.innerHTML;
+            btn.disabled = true;
+
+            var rowsHtml = [];
+            try {
+                for (var p = 1; p <= maxPage; p++) {
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading ' + p + '/' + maxPage + '...';
+                    var url = new URL(window.location.href);
+                    url.searchParams.set('page', p);
+                    var resp = await fetch(url.toString());
+                    var text = await resp.text();
+                    var doc = new DOMParser().parseFromString(text, 'text/html');
+                    var pageWrapper = doc.querySelectorAll('.table-responsive')[wrapperIndex];
+                    var pageTable = pageWrapper ? pageWrapper.querySelector('table') : null;
+                    var pageTbody = pageTable ? pageTable.querySelector('tbody') : null;
+                    if (pageTbody) rowsHtml.push(pageTbody.innerHTML);
+                }
+            } catch (e) {
+                alert('Could not load all pages for printing. Printing the current page instead.');
+                printTable(table);
+                btn.disabled = false;
+                btn.innerHTML = originalLabel;
+                return;
+            }
+
+            var merged = table.cloneNode(true);
+            var mergedTbody = merged.querySelector('tbody');
+            if (mergedTbody) mergedTbody.innerHTML = rowsHtml.join('');
+
+            btn.disabled = false;
+            btn.innerHTML = originalLabel;
+            printTable(merged);
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelectorAll('.table-responsive').forEach(function (wrapper) {
+                var table = wrapper.querySelector('table');
+                if (!table || wrapper.dataset.printButtonAdded) return;
+
+                // Skip data-entry tables (dynamic item rows with inputs/selects
+                // to fill in, e.g. dispatch/receipt line items) and anything
+                // explicitly opted out - a print button doesn't make sense
+                // for a table that's being filled in, not displaying data.
+                if (wrapper.closest('[data-no-print]') || table.hasAttribute('data-no-print')) return;
+                if (table.querySelector('input, select, textarea')) return;
+
+                wrapper.dataset.printButtonAdded = 'true';
+
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-sm btn-outline-secondary table-print-btn mb-2';
+                btn.innerHTML = '<i class="fas fa-print"></i> Print';
+                btn.addEventListener('click', function () {
+                    printTable(table);
+                });
+
+                wrapper.parentNode.insertBefore(btn, wrapper);
+
+                if (findPaginationMaxPage(wrapper) > 1) {
+                    var btnAll = document.createElement('button');
+                    btnAll.type = 'button';
+                    btnAll.className = 'btn btn-sm btn-outline-secondary table-print-btn mb-2 ms-2';
+                    btnAll.innerHTML = '<i class="fas fa-print"></i> Print All';
+                    btnAll.title = 'Print every page of this list, not just the current page';
+                    btnAll.addEventListener('click', function () {
+                        printAllPages(wrapper, table, btnAll);
+                    });
+                    wrapper.parentNode.insertBefore(btnAll, wrapper);
+                }
+            });
+        });
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

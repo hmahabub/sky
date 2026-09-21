@@ -12,9 +12,9 @@
             <div>
                 <h5 class="mb-1">{{ fabric.fabric_code }} - {{ fabric.fabric_name }}</h5>
                 <p class="text-muted small mb-0">Every lot addition, issue and adjustment recorded against this fabric</p>
-                {% if fabric.style or fabric.purchase_order or fabric.buyer %}
+                {% if fabric.project or fabric.purchase_order or fabric.buyer %}
                 <p class="text-muted small mb-0">
-                    {% if fabric.style %}Style: {{ fabric.style.style_number }}{% endif %}
+                    {% if fabric.project %}Project: {{ fabric.project.project_number }}{% endif %}
                     {% if fabric.purchase_order %} &middot; PO: {{ fabric.purchase_order.po_number }}{% endif %}
                     {% if fabric.buyer %} &middot; Buyer: {{ fabric.buyer.buyer_name }}{% endif %}
                 </p>

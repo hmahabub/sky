@@ -20,9 +20,10 @@ from django.db.models import F
 from django.utils import timezone
 
 from apps.accounts.models import (
-    ChartOfAccount, Buyer, Supplier, Style, PurchaseOrder, PurchaseOrderItem,
-    SalesInvoice, SalesInvoiceItem, Payment, JournalEntry, JournalDetail,
+    Buyer, Supplier, Project, PurchaseOrder, PurchaseOrderItem,
+    SalesInvoice, SalesInvoiceItem, Payment,
     CostSheet, BankAccount, BankTransaction,
+    LetterOfCredit, LCPayment, LCLoan, Cost,
 )
 from apps.hr.models import (
     Department, Designation, Employee, Attendance, Leave, ProductionOutput,
@@ -52,15 +53,15 @@ class Command(BaseCommand):
         self.user = User.objects.filter(is_superuser=True).order_by('id').first()
 
         with transaction.atomic():
-            self.seed_chart_of_accounts()
             self.seed_buyers()
             self.seed_suppliers()
-            self.seed_styles()
+            self.seed_projects()
             self.seed_purchase_orders()
             self.seed_sales_invoices()
             self.seed_bank_accounts()
-            self.seed_journal_entries()
             self.seed_cost_sheets()
+            self.seed_letters_of_credit()
+            self.seed_costs()
 
             self.seed_departments()
             self.seed_designations()
@@ -97,36 +98,6 @@ class Command(BaseCommand):
         self.print_summary()
 
     # ---------------------------------------------------------------- accounts
-
-    def seed_chart_of_accounts(self):
-        rows = [
-            ('1000', 'Cash in Hand', 'asset', 'current_asset'),
-            ('1010', 'Bank - Operating Account', 'asset', 'current_asset'),
-            ('1100', 'Accounts Receivable', 'asset', 'current_asset'),
-            ('1200', 'Raw Material Inventory', 'asset', 'current_asset'),
-            ('1500', 'Factory Equipment', 'asset', 'fixed_asset'),
-            ('2000', 'Accounts Payable', 'liability', 'current_liability'),
-            ('2100', 'Accrued Salaries', 'liability', 'current_liability'),
-            ('2500', 'Bank Loan', 'liability', 'long_term_liability'),
-            ('3000', "Owner's Capital", 'equity', 'income'),
-            ('3100', 'Retained Earnings', 'equity', 'income'),
-            ('4000', 'Export Sales', 'revenue', 'income'),
-            ('5000', 'Cost of Goods Sold', 'cogs', 'direct_expense'),
-            ('6000', 'Salaries & Wages', 'expense', 'direct_expense'),
-            ('6100', 'Utilities Expense', 'expense', 'indirect_expense'),
-            ('6200', 'Office & Admin Expense', 'expense', 'indirect_expense'),
-        ]
-        self.coa = {}
-        for code, name, acc_type, category in rows:
-            obj, _ = ChartOfAccount.objects.get_or_create(
-                account_code=code,
-                defaults=dict(
-                    account_name=name, account_type=acc_type,
-                    account_category=category,
-                    opening_balance=Decimal(random.randint(0, 500000)),
-                ),
-            )
-            self.coa[code] = obj
 
     def seed_buyers(self):
         data = [
@@ -177,25 +148,26 @@ class Command(BaseCommand):
             )
             self.suppliers.append(obj)
 
-    def seed_styles(self):
+    def seed_projects(self):
         names = [
             "Classic Crew Tee", "Slim Fit Polo", "Zip-Up Hoodie", "Denim Jeans",
             "Summer Maxi Dress", "Bomber Jacket", "Cargo Shorts", "Flannel Shirt",
         ]
         statuses = ['quotation', 'order', 'production', 'shipped', 'delivered']
-        self.styles = []
+        self.projects = []
         for i, name in enumerate(names, start=1):
-            style_number = f"STY-2026-{i:03d}"
+            project_number = f"STY-2026-{i:03d}"
             qty = random.randint(2000, 15000)
             unit_price = Decimal(random.randint(4, 25))
-            obj, _ = Style.objects.get_or_create(
-                style_number=style_number,
+            obj, _ = Project.objects.get_or_create(
+                project_number=project_number,
                 defaults=dict(
                     buyer=random.choice(self.buyers),
                     description=name,
                     order_quantity=qty,
                     unit_price=unit_price,
                     total_value=unit_price * qty,
+                    currency='USD',
                     cm_charge=Decimal(random.randint(1, 4)),
                     agent_commission=Decimal(random.randint(0, 2)),
                     fabric_cost=Decimal(random.randint(10000, 40000)),
@@ -209,7 +181,7 @@ class Command(BaseCommand):
             )
             if not obj.total_cost:
                 obj.calculate_profit()
-            self.styles.append(obj)
+            self.projects.append(obj)
 
     def seed_purchase_orders(self):
         for i in range(1, 6):
@@ -220,7 +192,7 @@ class Command(BaseCommand):
             po = PurchaseOrder.objects.create(
                 po_number=po_number,
                 supplier=random.choice(self.suppliers),
-                style=random.choice(self.styles),
+                style=random.choice(self.projects),
                 order_date=rand_date(30, 120),
                 delivery_date=rand_date(-30, 20),
                 total_amount=total,
@@ -243,7 +215,7 @@ class Command(BaseCommand):
             inv_number = f"INV-2026-{i:03d}"
             if SalesInvoice.objects.filter(invoice_number=inv_number).exists():
                 continue
-            style = random.choice(self.styles)
+            style = random.choice(self.projects)
             amount = Decimal(random.randint(30000, 150000))
             inv = SalesInvoice.objects.create(
                 invoice_number=inv_number,
@@ -305,31 +277,10 @@ class Command(BaseCommand):
                     )
                     txn.process_transaction()
 
-    def seed_journal_entries(self):
-        if JournalEntry.objects.exists():
-            return
-        pairs = [
-            ('opening', '3000', '1010', 'Opening capital injected to bank'),
-            ('sale', '1100', '4000', 'Export sale recognized'),
-            ('purchase', '1200', '2000', 'Raw material purchase on credit'),
-            ('payment', '2000', '1010', 'Supplier payment made'),
-        ]
-        for i, (j_type, debit_code, credit_code, desc) in enumerate(pairs, start=1):
-            amount = Decimal(random.randint(20000, 100000))
-            entry = JournalEntry.objects.create(
-                entry_number=f"JE-2026-{i:03d}",
-                journal_type=j_type,
-                entry_date=rand_date(1, 60),
-                description=desc,
-                created_by=self.user,
-            )
-            JournalDetail.objects.create(journal_entry=entry, account=self.coa[debit_code], debit_amount=amount)
-            JournalDetail.objects.create(journal_entry=entry, account=self.coa[credit_code], credit_amount=amount)
-
     def seed_cost_sheets(self):
         if CostSheet.objects.exists():
             return
-        for style in self.styles[:5]:
+        for style in self.projects[:5]:
             cs = CostSheet.objects.create(
                 style=style, cost_date=style.order_date,
                 fabric_cost=style.fabric_cost, trim_cost=style.trim_cost,
@@ -345,6 +296,74 @@ class Command(BaseCommand):
                 created_by=self.user,
             )
             cs.calculate_totals()
+
+    def seed_letters_of_credit(self):
+        if LetterOfCredit.objects.exists():
+            return
+        for i, project in enumerate(self.projects[:3], start=1):
+            lc = LetterOfCredit.objects.create(
+                lc_number=f"LC-2026-{i:03d}",
+                project=project,
+                lc_date=project.order_date,
+                bank_name="Prime Bank Ltd",
+                lc_amount=project.total_value,
+                currency=project.currency,
+                expiry_date=project.delivery_date,
+                status=random.choice(['active', 'utilized']),
+                created_by=self.user,
+            )
+            for j in range(random.randint(1, 2)):
+                LCPayment.objects.create(
+                    lc=lc,
+                    payment_date=rand_date(5, 40),
+                    amount=lc.lc_amount * Decimal(random.choice(['0.2', '0.3', '0.4'])),
+                    bank_name=lc.bank_name,
+                    reference=f"REF-{lc.lc_number}-{j + 1}",
+                    created_by=self.user,
+                )
+            if i == 1:
+                LCLoan.objects.create(
+                    lc=lc,
+                    loan_date=rand_date(10, 50),
+                    bank_name=lc.bank_name,
+                    loan_amount=lc.lc_amount * Decimal('0.5'),
+                    interest=lc.lc_amount * Decimal('0.02'),
+                    other_charges=Decimal(random.randint(500, 2000)),
+                    repaid_amount=lc.lc_amount * Decimal('0.1'),
+                    created_by=self.user,
+                )
+
+    def seed_costs(self):
+        if Cost.objects.exists():
+            return
+        po_cost_types = ['fabric', 'accessories', 'production']
+        other_cost_types = ['transport', 'commission', 'bank_charges', 'documentation', 'miscellaneous']
+        purchase_orders = list(PurchaseOrder.objects.all())
+        for project in self.projects:
+            project_pos = [po for po in purchase_orders if po.style_id == project.pk]
+            for cost_type in random.sample(po_cost_types, k=2):
+                Cost.objects.create(
+                    project=project,
+                    purchase_order=random.choice(project_pos) if project_pos else None,
+                    cost_type=cost_type,
+                    cost_date=rand_date(5, 60),
+                    description=f"{cost_type.title()} cost for {project.project_number}",
+                    amount=Decimal(random.randint(2000, 15000)),
+                    currency=project.currency,
+                    payment_status=random.choice(['unpaid', 'partial', 'paid']),
+                    created_by=self.user,
+                )
+            for cost_type in random.sample(other_cost_types, k=2):
+                Cost.objects.create(
+                    project=project,
+                    cost_type=cost_type,
+                    cost_date=rand_date(5, 60),
+                    description=f"{cost_type.title()} cost for {project.project_number}",
+                    amount=Decimal(random.randint(500, 5000)),
+                    currency=project.currency,
+                    payment_status=random.choice(['unpaid', 'partial', 'paid']),
+                    created_by=self.user,
+                )
 
     # --------------------------------------------------------------------- hr
 
@@ -476,7 +495,7 @@ class Command(BaseCommand):
                 defective = random.randint(0, 10)
                 ProductionOutput.objects.create(
                     employee=emp, date=TODAY - timedelta(days=d),
-                    style_number=random.choice(self.styles).style_number,
+                    style_number=random.choice(self.projects).project_number,
                     operation_name=random.choice(['Collar Attach', 'Side Seam', 'Hemming', 'Button Hole']),
                     quantity_produced=produced, defective_quantity=defective,
                     line_supervisor="Line Supervisor", shift=emp.shift,
@@ -487,9 +506,9 @@ class Command(BaseCommand):
         if PieceRateSetting.objects.exists():
             return
         ops = ['Collar Attach', 'Side Seam', 'Hemming', 'Button Hole', 'Zipper Attach']
-        for i, style in enumerate(self.styles[:5]):
+        for i, project in enumerate(self.projects[:5]):
             PieceRateSetting.objects.create(
-                style_number=style.style_number, operation_name=ops[i % len(ops)],
+                style_number=project.project_number, operation_name=ops[i % len(ops)],
                 skill_level=random.choice(['beginner', 'intermediate', 'expert']),
                 rate_per_piece=Decimal(str(round(random.uniform(1.5, 6.0), 2))),
                 target_per_day=random.randint(80, 200),
@@ -721,7 +740,7 @@ class Command(BaseCommand):
             defective = random.randint(0, 30)
             FinishedGoodsProduction.objects.create(
                 batch_number=f"BATCH-2026-{i:04d}",
-                style=random.choice(self.styles),
+                project=random.choice(self.projects),
                 finished_goods=fg,
                 production_date=rand_date(1, 90),
                 quantity_produced=produced,
@@ -737,10 +756,10 @@ class Command(BaseCommand):
         if ProductionIssue.objects.exists():
             return
         for i in range(1, 6):
-            style = random.choice(self.styles)
+            project = random.choice(self.projects)
             issue = ProductionIssue.objects.create(
                 issue_number=f"ISS-2026-{i:03d}",
-                style=style, issue_date=rand_date(1, 60),
+                project=project, issue_date=rand_date(1, 60),
                 issued_by=self.user,
                 department=self.departments['CUT'],
                 production_line=f"Line-{random.randint(1,6)}",
@@ -757,7 +776,7 @@ class Command(BaseCommand):
                 StockMovement.objects.create(
                     movement_type='issue', reference_number=issue.issue_number,
                     reference_id=issue.pk, fabric=fabric, quantity=-qty,
-                    notes=f"Issued to production - {style.style_number}", created_by=self.user,
+                    notes=f"Issued to production - {project.project_number}", created_by=self.user,
                 )
 
     def seed_dispatches(self):
@@ -766,12 +785,11 @@ class Command(BaseCommand):
         available = [fg for fg in self.finished_goods if fg.quantity_in_stock > 10]
         for i in range(1, min(9, len(available) + 1)):
             fg = available[i - 1] if i - 1 < len(available) else random.choice(available)
-            style = random.choice(self.styles)
-            buyer = style.buyer
+            project = random.choice(self.projects)
             qty = random.randint(5, min(50, fg.quantity_in_stock))
             dispatch = Dispatch.objects.create(
                 dispatch_number=f"DSP-2026-{i:03d}",
-                style=style, buyer=buyer,
+                project=project,
                 dispatch_date=rand_date(1, 45),
                 total_cartons=random.randint(1, 5),
                 total_quantity=qty,
@@ -790,7 +808,7 @@ class Command(BaseCommand):
             StockMovement.objects.create(
                 movement_type='dispatch', reference_number=dispatch.dispatch_number,
                 reference_id=dispatch.pk, finished_goods=fg, quantity=-qty,
-                notes=f"Dispatched to {buyer.buyer_name}", created_by=self.user,
+                notes=f"Dispatched to {project.buyer.buyer_name}", created_by=self.user,
             )
 
     def seed_stock_adjustments(self):
@@ -1106,8 +1124,9 @@ class Command(BaseCommand):
     def print_summary(self):
         rows = [
             ("Buyers", Buyer.objects.count()), ("Suppliers", Supplier.objects.count()),
-            ("Styles", Style.objects.count()), ("Purchase Orders", PurchaseOrder.objects.count()),
-            ("Sales Invoices", SalesInvoice.objects.count()), ("Departments", Department.objects.count()),
+            ("Projects", Project.objects.count()), ("Purchase Orders", PurchaseOrder.objects.count()),
+            ("Sales Invoices", SalesInvoice.objects.count()), ("Letters of Credit", LetterOfCredit.objects.count()),
+            ("Costs", Cost.objects.count()), ("Departments", Department.objects.count()),
             ("Employees", Employee.objects.count()), ("Fabrics", Fabric.objects.count()),
             ("Trims", Trim.objects.count()), ("Finished Goods", FinishedGoods.objects.count()),
             ("Dispatches", Dispatch.objects.count()), ("Stock Adjustments", StockAdjustment.objects.count()),

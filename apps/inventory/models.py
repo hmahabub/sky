@@ -35,7 +35,7 @@ class Fabric(models.Model):
     gsm = models.IntegerField(help_text="Grams per square meter")
     width = models.DecimalField(max_digits=10, decimal_places=2, help_text="Width in inches")
     supplier = models.ForeignKey('accounts.Supplier', on_delete=models.SET_NULL, null=True, related_name='fabrics')
-    style = models.ForeignKey('accounts.Style', on_delete=models.SET_NULL, null=True, blank=True, related_name='fabrics')
+    project = models.ForeignKey('accounts.Project', on_delete=models.SET_NULL, null=True, blank=True, related_name='fabrics')
     purchase_order = models.ForeignKey('accounts.PurchaseOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='fabrics')
     buyer = models.ForeignKey('accounts.Buyer', on_delete=models.SET_NULL, null=True, blank=True, related_name='fabrics')
     unit = models.CharField(max_length=20, choices=UNIT_CHOICES, default='meter')
@@ -289,7 +289,7 @@ class TrimReceiptDetail(models.Model):
 class ProductionIssue(models.Model):
     """Issue materials to production"""
     issue_number = models.CharField(max_length=50, unique=True)
-    style = models.ForeignKey('accounts.Style', on_delete=models.CASCADE, related_name='issues')
+    project = models.ForeignKey('accounts.Project', on_delete=models.CASCADE, related_name='issues')
     issue_date = models.DateField()
     issued_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='issued_materials')
     department = models.ForeignKey('hr.Department', on_delete=models.SET_NULL, null=True, related_name='issues')
@@ -306,7 +306,7 @@ class ProductionIssue(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     def __str__(self):
-        return f"{self.issue_number} - {self.style.style_number}"
+        return f"{self.issue_number} - {self.project.project_number}"
     
     class Meta:
         ordering = ['-issue_date']
@@ -370,7 +370,7 @@ class FinishedGoods(models.Model):
 class FinishedGoodsProduction(models.Model):
     """Production batch for finished goods"""
     batch_number = models.CharField(max_length=50, unique=True)
-    style = models.ForeignKey('accounts.Style', on_delete=models.CASCADE, related_name='production_batches')
+    project = models.ForeignKey('accounts.Project', on_delete=models.CASCADE, related_name='production_batches')
     finished_goods = models.ForeignKey(FinishedGoods, on_delete=models.CASCADE, related_name='production_batches')
     production_date = models.DateField()
     quantity_produced = models.IntegerField()
@@ -394,7 +394,7 @@ class FinishedGoodsProduction(models.Model):
         super().save(*args, **kwargs)
     
     def __str__(self):
-        return f"{self.batch_number} - {self.style.style_number}"
+        return f"{self.batch_number} - {self.project.project_number}"
     
     @property
     def quality_rate(self):
@@ -424,9 +424,7 @@ class Dispatch(models.Model):
     ]
 
     dispatch_number = models.CharField(max_length=50, unique=True)
-    style = models.ForeignKey('accounts.Style', on_delete=models.CASCADE, related_name='dispatches')
-    buyer = models.ForeignKey('accounts.Buyer', on_delete=models.CASCADE, related_name='dispatches')
-    purchase_order = models.ForeignKey('accounts.PurchaseOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='dispatches')
+    project = models.ForeignKey('accounts.Project', on_delete=models.CASCADE, related_name='dispatches')
     dispatch_date = models.DateField()
     total_cartons = models.IntegerField()
     # Computed from line items after they're added (see add_dispatch), so it
@@ -457,7 +455,7 @@ class Dispatch(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.dispatch_number} - {self.buyer.buyer_name}"
+        return f"{self.dispatch_number} - {self.project.buyer.buyer_name}"
 
     @property
     def is_status_locked(self):

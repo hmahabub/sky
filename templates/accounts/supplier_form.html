@@ -1,9 +1,9 @@
 {% extends 'base/base.html' %}
 {% load static %}
 
-{% block title %}Add Supplier - SkyTex ERP{% endblock %}
+{% block title %}{% if supplier %}Edit{% else %}Add{% endif %} Supplier - SkyTex ERP{% endblock %}
 
-{% block page_title %}Add Supplier{% endblock %}
+{% block page_title %}{% if supplier %}Edit{% else %}Add{% endif %} Supplier{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
@@ -91,7 +91,7 @@
                     
                     <div class="mt-4 border-top pt-3">
                         <button type="submit" class="btn btn-gradient">
-                            <i class="fas fa-save"></i> Create Supplier
+                            <i class="fas fa-save"></i> {% if supplier %}Update{% else %}Create{% endif %} Supplier
                         </button>
                         <a href="{% url 'accounts:suppliers_list' %}" class="btn btn-secondary">
                             <i class="fas fa-times"></i> Cancel

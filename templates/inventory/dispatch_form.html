@@ -25,40 +25,28 @@
                     {% endif %}
                     
                     <div class="row">
-                        <div class="col-md-4">
+                        <div class="col-md-6">
                             <div class="mb-3">
                                 <label class="form-label">Dispatch Number *</label>
                                 {{ form.dispatch_number }}
                             </div>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Style *</label>
-                                {{ form.style }}
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label class="form-label">Buyer *</label>
-                                {{ form.buyer }}
+                                <label class="form-label">Project *</label>
+                                {{ form.project }}
                             </div>
                         </div>
                     </div>
 
                     <div class="row">
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label class="form-label">Purchase Order</label>
-                                {{ form.purchase_order }}
-                            </div>
-                        </div>
-                        <div class="col-md-4">
+                        <div class="col-md-6">
                             <div class="mb-3">
                                 <label class="form-label">Dispatch Date *</label>
                                 {{ form.dispatch_date }}
                             </div>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-6">
                             <div class="mb-3">
                                 <label class="form-label">Total Cartons *</label>
                                 {{ form.total_cartons }}
@@ -157,7 +145,7 @@
                                         <select name="finished_goods_ids[]" class="form-select">
                                             <option value="">Select Product</option>
                                             {% for fg in finished_goods %}
-                                            <option value="{{ fg.id }}">{{ fg.sku_code }} - {{ fg.style.style_number }} ({{ fg.quantity_in_stock }} available)</option>
+                                            <option value="{{ fg.id }}">{{ fg.sku_code }} - {{ fg.style.project_number }} ({{ fg.quantity_in_stock }} available)</option>
                                             {% endfor %}
                                         </select>
                                     </td>

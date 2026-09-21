@@ -102,7 +102,7 @@
                 <thead>
                     <tr>
                         <th>Dispatch #</th>
-                        <th>Style</th>
+                        <th>Project</th>
                         <th>Buyer</th>
                         <th>Requested By</th>
                         <th>Actions</th>
@@ -112,8 +112,8 @@
                     {% for dispatch in dispatch_shipments %}
                     <tr>
                         <td><strong>{{ dispatch.dispatch_number }}</strong></td>
-                        <td>{{ dispatch.style.style_number }}</td>
-                        <td>{{ dispatch.buyer.buyer_name }}</td>
+                        <td>{{ dispatch.project.project_number }}</td>
+                        <td>{{ dispatch.project.buyer.buyer_name }}</td>
                         <td>{{ dispatch.shipment_requested_by.username|default:"-" }}</td>
                         <td>
                             <div class="btn-group btn-group-sm">

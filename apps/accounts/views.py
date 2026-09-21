@@ -11,65 +11,66 @@ import csv
 from decimal import Decimal
 
 from .models import (
-    ChartOfAccount, Buyer, Supplier, Style, PurchaseOrder, PurchaseOrderItem,
-    SalesInvoice, SalesInvoiceItem, Payment, JournalEntry, JournalDetail,
-    CostSheet, BankAccount, BankTransaction
+    Buyer, Supplier, Project, PurchaseOrder, PurchaseOrderItem,
+    SalesInvoice, SalesInvoiceItem, Payment,
+    CostSheet, BankAccount, BankTransaction,
+    LetterOfCredit, LCPayment, LCLoan, Cost,
 )
 from .forms import (
-    ChartOfAccountForm, BuyerForm, SupplierForm, StyleForm, PurchaseOrderForm,
-    SalesInvoiceForm, PaymentForm, JournalEntryForm, JournalDetailForm,
-    CostSheetForm, BankAccountForm, BankTransactionForm
+    BuyerForm, SupplierForm, ProjectForm, PurchaseOrderForm,
+    SalesInvoiceForm, PaymentForm,
+    CostSheetForm, BankAccountForm, BankTransactionForm,
+    LetterOfCreditForm, LCPaymentForm, LCLoanForm, CostForm,
 )
 
-# Helper function for role-based access
-def is_accounts_or_admin(user):
-    return user.is_superuser or user.groups.filter(name='Accounts').exists()
+# Accounts is superuser-only, module-wide - no separate approver role.
+is_superuser = user_passes_test(lambda u: u.is_superuser)
 
-@login_required
+@is_superuser
 def accounts_dashboard(request):
     """Accounts Dashboard Overview"""
     context = {
         'active': 'accounts',
         'page_title': 'Accounts Dashboard',
     }
-    
+
     # Financial Summary
     context['total_buyers'] = Buyer.objects.filter(is_active=True).count()
     context['total_suppliers'] = Supplier.objects.filter(is_active=True).count()
-    context['total_styles'] = Style.objects.filter(is_active=True).count()
-    
+    context['total_projects'] = Project.objects.filter(is_active=True).count()
+
     # Sales Summary
     current_month = date.today().month
     current_year = date.today().year
-    
+
     monthly_sales = SalesInvoice.objects.filter(
         invoice_date__month=current_month,
         invoice_date__year=current_year,
         status='paid'
     ).aggregate(total=Sum('net_amount'))['total'] or 0
     context['monthly_sales'] = monthly_sales
-    
+
     # Receivables
     receivables = SalesInvoice.objects.filter(
         status__in=['pending', 'partial', 'overdue']
     ).aggregate(total=Sum('net_amount') - Sum('paid_amount'))['total'] or 0
     context['receivables'] = receivables
-    
+
     # Payables
     payables = PurchaseOrder.objects.filter(
         status__in=['approved', 'received']
     ).aggregate(total=Sum('net_amount') - Sum('advance_paid'))['total'] or 0
     context['payables'] = payables
-    
+
     # Cash Balance
     context['cash_balance'] = BankAccount.objects.aggregate(
         total=Sum('current_balance')
     )['total'] or 0
-    
+
     # Recent Transactions
     context['recent_invoices'] = SalesInvoice.objects.select_related('buyer').order_by('-created_at')[:5]
     context['recent_payments'] = Payment.objects.select_related('buyer', 'supplier').order_by('-created_at')[:5]
-    
+
     # Chart Data - Monthly Sales
     monthly_sales_data = []
     months = []
@@ -86,62 +87,25 @@ def accounts_dashboard(request):
         ).aggregate(total=Sum('net_amount'))['total'] or 0
         monthly_sales_data.append(float(total))
         months.append(date(year, month, 1).strftime('%B'))
-    
+
     context['monthly_sales_data'] = monthly_sales_data
     context['months'] = months
-    
+
     # Overdue Invoices
     overdue_invoices = SalesInvoice.objects.filter(
         status='overdue'
     ).count()
     context['overdue_invoices'] = overdue_invoices
-    
+
     return render(request, 'accounts/dashboard.html', context)
 
-@login_required
-def chart_of_accounts(request):
-    """Chart of Accounts management"""
-    accounts = ChartOfAccount.objects.filter(is_active=True).select_related('parent_account')
-    
-    # Filter by type
-    account_type = request.GET.get('type')
-    if account_type:
-        accounts = accounts.filter(account_type=account_type)
-    
-    context = {
-        'active': 'accounts',
-        'page_title': 'Chart of Accounts',
-        'accounts': accounts,
-        'account_types': ChartOfAccount.ACCOUNT_TYPES,
-        'current_type': account_type,
-    }
-    return render(request, 'accounts/chart_of_accounts.html', context)
+# ------------------------------------------------------------------- buyers
 
-@login_required
-@user_passes_test(is_accounts_or_admin)
-def add_account(request):
-    """Add new account"""
-    if request.method == 'POST':
-        form = ChartOfAccountForm(request.POST)
-        if form.is_valid():
-            account = form.save()
-            messages.success(request, f'Account "{account.account_name}" created successfully!')
-            return redirect('accounts:chart_of_accounts')
-    else:
-        form = ChartOfAccountForm()
-    
-    context = {
-        'active': 'accounts',
-        'page_title': 'Add Account',
-        'form': form,
-    }
-    return render(request, 'accounts/account_form.html', context)
-
-@login_required
+@is_superuser
 def buyers_list(request):
     """List all buyers"""
     buyers = Buyer.objects.filter(is_active=True)
-    
+
     search = request.GET.get('search')
     if search:
         buyers = buyers.filter(
@@ -149,7 +113,7 @@ def buyers_list(request):
             Q(buyer_code__icontains=search) |
             Q(country__icontains=search)
         )
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Buyers',
@@ -158,8 +122,7 @@ def buyers_list(request):
     }
     return render(request, 'accounts/buyers_list.html', context)
 
-@login_required
-@user_passes_test(is_accounts_or_admin)
+@is_superuser
 def add_buyer(request):
     """Add new buyer"""
     if request.method == 'POST':
@@ -170,7 +133,7 @@ def add_buyer(request):
             return redirect('accounts:buyers_list')
     else:
         form = BuyerForm()
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Add Buyer',
@@ -178,18 +141,41 @@ def add_buyer(request):
     }
     return render(request, 'accounts/buyer_form.html', context)
 
-@login_required
+@is_superuser
+def edit_buyer(request, pk):
+    """Edit buyer"""
+    buyer = get_object_or_404(Buyer, pk=pk)
+    if request.method == 'POST':
+        form = BuyerForm(request.POST, instance=buyer)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Buyer "{buyer.buyer_name}" updated successfully!')
+            return redirect('accounts:buyers_list')
+    else:
+        form = BuyerForm(instance=buyer)
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Edit Buyer',
+        'form': form,
+        'buyer': buyer,
+    }
+    return render(request, 'accounts/buyer_form.html', context)
+
+# ---------------------------------------------------------------- suppliers
+
+@is_superuser
 def suppliers_list(request):
     """List all suppliers"""
     suppliers = Supplier.objects.filter(is_active=True)
-    
+
     search = request.GET.get('search')
     if search:
         suppliers = suppliers.filter(
             Q(supplier_name__icontains=search) |
             Q(supplier_code__icontains=search)
         )
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Suppliers',
@@ -198,8 +184,7 @@ def suppliers_list(request):
     }
     return render(request, 'accounts/suppliers_list.html', context)
 
-@login_required
-@user_passes_test(is_accounts_or_admin)
+@is_superuser
 def add_supplier(request):
     """Add new supplier"""
     if request.method == 'POST':
@@ -210,7 +195,7 @@ def add_supplier(request):
             return redirect('accounts:suppliers_list')
     else:
         form = SupplierForm()
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Add Supplier',
@@ -218,63 +203,130 @@ def add_supplier(request):
     }
     return render(request, 'accounts/supplier_form.html', context)
 
-@login_required
-def styles_list(request):
-    """List all styles"""
-    styles = Style.objects.select_related('buyer').all()
-    
-    status = request.GET.get('status')
-    if status:
-        styles = styles.filter(status=status)
-    
-    buyer = request.GET.get('buyer')
-    if buyer:
-        styles = styles.filter(buyer_id=buyer)
-    
+@is_superuser
+def edit_supplier(request, pk):
+    """Edit supplier"""
+    supplier = get_object_or_404(Supplier, pk=pk)
+    if request.method == 'POST':
+        form = SupplierForm(request.POST, instance=supplier)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Supplier "{supplier.supplier_name}" updated successfully!')
+            return redirect('accounts:suppliers_list')
+    else:
+        form = SupplierForm(instance=supplier)
+
     context = {
         'active': 'accounts',
-        'page_title': 'Styles',
-        'styles': styles,
-        'statuses': Style.STATUS_CHOICES,
+        'page_title': 'Edit Supplier',
+        'form': form,
+        'supplier': supplier,
+    }
+    return render(request, 'accounts/supplier_form.html', context)
+
+# ----------------------------------------------------------------- projects
+
+@is_superuser
+def projects_list(request):
+    """List all projects"""
+    projects = Project.objects.select_related('buyer').all()
+
+    status = request.GET.get('status')
+    if status:
+        projects = projects.filter(status=status)
+
+    buyer = request.GET.get('buyer')
+    if buyer:
+        projects = projects.filter(buyer_id=buyer)
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Projects',
+        'projects': projects,
+        'statuses': Project.STATUS_CHOICES,
         'buyers': Buyer.objects.filter(is_active=True),
         'current_status': status,
         'current_buyer': buyer,
     }
-    return render(request, 'accounts/styles_list.html', context)
+    return render(request, 'accounts/projects_list.html', context)
 
-@login_required
-@user_passes_test(is_accounts_or_admin)
-def add_style(request):
-    """Add new style"""
+@is_superuser
+def add_project(request):
+    """Add new project"""
     if request.method == 'POST':
-        form = StyleForm(request.POST)
+        form = ProjectForm(request.POST)
         if form.is_valid():
-            style = form.save()
-            messages.success(request, f'Style "{style.style_number}" created successfully!')
-            return redirect('accounts:styles_list')
+            project = form.save(commit=False)
+            project.total_value = project.unit_price * project.order_quantity
+            project.save()
+            project.calculate_profit()
+            messages.success(request, f'Project "{project.project_number}" created successfully!')
+            return redirect('accounts:projects_list')
     else:
-        form = StyleForm()
-    
+        form = ProjectForm()
+
     context = {
         'active': 'accounts',
-        'page_title': 'Add Style',
+        'page_title': 'Add Project',
         'form': form,
     }
-    return render(request, 'accounts/style_form.html', context)
+    return render(request, 'accounts/project_form.html', context)
 
-@login_required
+@is_superuser
+def edit_project(request, pk):
+    """Edit project"""
+    project = get_object_or_404(Project, pk=pk)
+    if request.method == 'POST':
+        form = ProjectForm(request.POST, instance=project)
+        if form.is_valid():
+            project = form.save(commit=False)
+            project.total_value = project.unit_price * project.order_quantity
+            project.save()
+            project.calculate_profit()
+            messages.success(request, f'Project "{project.project_number}" updated successfully!')
+            return redirect('accounts:projects_list')
+    else:
+        form = ProjectForm(instance=project)
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Edit Project',
+        'form': form,
+        'project': project,
+    }
+    return render(request, 'accounts/project_form.html', context)
+
+@is_superuser
+def project_detail(request, pk):
+    """Project financial summary - PDF Section 10"""
+    project = get_object_or_404(Project, pk=pk)
+
+    context = {
+        'active': 'accounts',
+        'page_title': f'Project - {project.project_number}',
+        'project': project,
+        'letters_of_credit': project.letters_of_credit.all(),
+        'purchase_orders': project.purchase_orders.all(),
+        'costs': project.costs.select_related('purchase_order').all(),
+        'invoices': project.invoices.all(),
+    }
+    return render(request, 'accounts/project_detail.html', context)
+
+# ---------------------------------------------------------------- invoices
+
+@is_superuser
 def invoices_list(request):
     """List all invoices"""
     invoices = SalesInvoice.objects.select_related('buyer', 'style').all()
-    
+
     status = request.GET.get('status')
     if status:
         invoices = invoices.filter(status=status)
-    
+
     buyer = request.GET.get('buyer')
     if buyer:
         invoices = invoices.filter(buyer_id=buyer)
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Sales Invoices',
@@ -286,8 +338,7 @@ def invoices_list(request):
     }
     return render(request, 'accounts/invoices_list.html', context)
 
-@login_required
-@user_passes_test(is_accounts_or_admin)
+@is_superuser
 def add_invoice(request):
     """Add new invoice"""
     if request.method == 'POST':
@@ -296,15 +347,12 @@ def add_invoice(request):
             invoice = form.save(commit=False)
             invoice.created_by = request.user
             invoice.save()
-            
-            # Create journal entry
-            create_sales_journal_entry(invoice)
-            
+
             messages.success(request, f'Invoice "{invoice.invoice_number}" created successfully!')
             return redirect('accounts:invoice_detail', pk=invoice.pk)
     else:
         form = SalesInvoiceForm()
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Create Invoice',
@@ -312,11 +360,11 @@ def add_invoice(request):
     }
     return render(request, 'accounts/invoice_form.html', context)
 
-@login_required
+@is_superuser
 def invoice_detail(request, pk):
     """View invoice details"""
     invoice = get_object_or_404(SalesInvoice, pk=pk)
-    
+
     context = {
         'active': 'accounts',
         'page_title': f'Invoice - {invoice.invoice_number}',
@@ -325,15 +373,17 @@ def invoice_detail(request, pk):
     }
     return render(request, 'accounts/invoice_detail.html', context)
 
-@login_required
+# ---------------------------------------------------------------- payments
+
+@is_superuser
 def payments_list(request):
     """List all payments"""
     payments = Payment.objects.select_related('buyer', 'supplier').all()
-    
+
     payment_type = request.GET.get('type')
     if payment_type:
         payments = payments.filter(payment_type=payment_type)
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Payments',
@@ -343,8 +393,7 @@ def payments_list(request):
     }
     return render(request, 'accounts/payments_list.html', context)
 
-@login_required
-@user_passes_test(is_accounts_or_admin)
+@is_superuser
 def add_payment(request):
     """Add new payment"""
     if request.method == 'POST':
@@ -353,18 +402,15 @@ def add_payment(request):
             payment = form.save(commit=False)
             payment.created_by = request.user
             payment.save()
-            
+
             # Process the payment
             payment.process_payment()
-            
-            # Create journal entry
-            create_payment_journal_entry(payment)
-            
+
             messages.success(request, f'Payment "{payment.payment_number}" processed successfully!')
             return redirect('accounts:payments_list')
     else:
         form = PaymentForm()
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Add Payment',
@@ -372,90 +418,255 @@ def add_payment(request):
     }
     return render(request, 'accounts/payment_form.html', context)
 
-@login_required
-def journal_entries(request):
-    """List all journal entries"""
-    entries = JournalEntry.objects.select_related('created_by').all()
-    
-    entry_type = request.GET.get('type')
-    if entry_type:
-        entries = entries.filter(journal_type=entry_type)
-    
+# ------------------------------------------------------------ letters of credit
+
+@is_superuser
+def lc_list(request):
+    """List all letters of credit"""
+    lcs = LetterOfCredit.objects.select_related('project').all()
+
+    status = request.GET.get('status')
+    if status:
+        lcs = lcs.filter(status=status)
+
     context = {
         'active': 'accounts',
-        'page_title': 'Journal Entries',
-        'entries': entries,
-        'journal_types': JournalEntry.JOURNAL_TYPES,
-        'current_type': entry_type,
+        'page_title': 'Letters of Credit',
+        'lcs': lcs,
+        'statuses': LetterOfCredit.STATUS_CHOICES,
+        'current_status': status,
     }
-    return render(request, 'accounts/journal_entries.html', context)
+    return render(request, 'accounts/lc_list.html', context)
 
-@login_required
-@user_passes_test(is_accounts_or_admin)
-def add_journal_entry(request):
-    """Add new journal entry"""
+@is_superuser
+def add_lc(request):
+    """Add new letter of credit"""
     if request.method == 'POST':
-        form = JournalEntryForm(request.POST)
+        form = LetterOfCreditForm(request.POST)
         if form.is_valid():
-            entry = form.save(commit=False)
-            entry.created_by = request.user
-            entry.save()
-            
-            # Handle journal details from form
-            account_ids = request.POST.getlist('account_ids[]')
-            debit_amounts = request.POST.getlist('debit_amounts[]')
-            credit_amounts = request.POST.getlist('credit_amounts[]')
-            notes = request.POST.getlist('notes[]')
-            
-            for i in range(len(account_ids)):
-                if account_ids[i]:
-                    JournalDetail.objects.create(
-                        journal_entry=entry,
-                        account_id=int(account_ids[i]),
-                        debit_amount=Decimal(debit_amounts[i] or 0),
-                        credit_amount=Decimal(credit_amounts[i] or 0),
-                        notes=notes[i] if i < len(notes) else ''
-                    )
-            
-            if entry.is_balanced():
-                messages.success(request, f'Journal entry "{entry.entry_number}" created successfully!')
-            else:
-                messages.warning(request, 'Journal entry created but is not balanced!')
-            
-            return redirect('accounts:journal_entries')
+            lc = form.save(commit=False)
+            lc.created_by = request.user
+            lc.save()
+            messages.success(request, f'Letter of Credit "{lc.lc_number}" created successfully!')
+            return redirect('accounts:lc_detail', pk=lc.pk)
     else:
-        form = JournalEntryForm()
-    
-    accounts = ChartOfAccount.objects.filter(is_active=True)
-    
+        form = LetterOfCreditForm()
+
     context = {
         'active': 'accounts',
-        'page_title': 'Add Journal Entry',
+        'page_title': 'Add Letter of Credit',
         'form': form,
-        'accounts': accounts,
     }
-    return render(request, 'accounts/journal_entry_form.html', context)
+    return render(request, 'accounts/lc_form.html', context)
 
-@login_required
+@is_superuser
+def lc_detail(request, pk):
+    """View LC details - payments, loans, outstanding"""
+    lc = get_object_or_404(LetterOfCredit, pk=pk)
+
+    context = {
+        'active': 'accounts',
+        'page_title': f'LC - {lc.lc_number}',
+        'lc': lc,
+        'payments': lc.lc_payments.all(),
+        'loans': lc.lc_loans.all(),
+    }
+    return render(request, 'accounts/lc_detail.html', context)
+
+@is_superuser
+def add_lc_payment(request, pk):
+    """Record a payment against an LC"""
+    lc = get_object_or_404(LetterOfCredit, pk=pk)
+    if request.method == 'POST':
+        form = LCPaymentForm(request.POST)
+        if form.is_valid():
+            payment = form.save(commit=False)
+            payment.lc = lc
+            payment.created_by = request.user
+            payment.save()
+            messages.success(request, f'Payment of {payment.amount} recorded against "{lc.lc_number}"!')
+            return redirect('accounts:lc_detail', pk=lc.pk)
+    else:
+        form = LCPaymentForm()
+
+    context = {
+        'active': 'accounts',
+        'page_title': f'Add Payment - {lc.lc_number}',
+        'form': form,
+        'lc': lc,
+    }
+    return render(request, 'accounts/lc_payment_form.html', context)
+
+@is_superuser
+def add_lc_loan(request, pk):
+    """Record a loan against an LC"""
+    lc = get_object_or_404(LetterOfCredit, pk=pk)
+    if request.method == 'POST':
+        form = LCLoanForm(request.POST)
+        if form.is_valid():
+            loan = form.save(commit=False)
+            loan.lc = lc
+            loan.created_by = request.user
+            loan.save()
+            messages.success(request, f'Loan of {loan.loan_amount} recorded against "{lc.lc_number}"!')
+            return redirect('accounts:lc_detail', pk=lc.pk)
+    else:
+        form = LCLoanForm()
+
+    context = {
+        'active': 'accounts',
+        'page_title': f'Add Loan - {lc.lc_number}',
+        'form': form,
+        'lc': lc,
+    }
+    return render(request, 'accounts/lc_loan_form.html', context)
+
+# -------------------------------------------------------------------- costs
+
+@is_superuser
+def costs_list(request):
+    """List all actual costs (PO cost + other cost)"""
+    costs = Cost.objects.select_related('project', 'purchase_order').all()
+
+    project = request.GET.get('project')
+    if project:
+        costs = costs.filter(project_id=project)
+
+    cost_type = request.GET.get('cost_type')
+    if cost_type:
+        costs = costs.filter(cost_type=cost_type)
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Costs',
+        'costs': costs,
+        'projects': Project.objects.filter(is_active=True),
+        'cost_types': Cost.COST_TYPES,
+        'current_project': project,
+        'current_cost_type': cost_type,
+    }
+    return render(request, 'accounts/costs_list.html', context)
+
+@is_superuser
+def add_cost(request):
+    """Add new cost entry"""
+    if request.method == 'POST':
+        form = CostForm(request.POST)
+        if form.is_valid():
+            cost = form.save(commit=False)
+            cost.created_by = request.user
+            cost.save()
+            messages.success(request, f'Cost entry for "{cost.project.project_number}" added successfully!')
+            return redirect('accounts:costs_list')
+    else:
+        form = CostForm()
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Add Cost',
+        'form': form,
+    }
+    return render(request, 'accounts/cost_form.html', context)
+
+# ----------------------------------------------------------- purchase orders
+
+@is_superuser
+def purchase_orders_list(request):
+    """List all purchase orders"""
+    orders = PurchaseOrder.objects.select_related('supplier', 'style').all()
+
+    status = request.GET.get('status')
+    if status:
+        orders = orders.filter(status=status)
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Purchase Orders',
+        'orders': orders,
+        'statuses': PurchaseOrder.STATUS_CHOICES,
+        'current_status': status,
+    }
+    return render(request, 'accounts/purchase_orders_list.html', context)
+
+@is_superuser
+def add_purchase_order(request):
+    """Add new purchase order"""
+    if request.method == 'POST':
+        form = PurchaseOrderForm(request.POST)
+        if form.is_valid():
+            po = form.save(commit=False)
+            po.created_by = request.user
+            po.save()
+            po.calculate_net_amount()
+            messages.success(request, f'Purchase Order "{po.po_number}" created successfully!')
+            return redirect('accounts:purchase_order_detail', pk=po.pk)
+    else:
+        form = PurchaseOrderForm()
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Add Purchase Order',
+        'form': form,
+    }
+    return render(request, 'accounts/purchase_order_form.html', context)
+
+@is_superuser
+def edit_purchase_order(request, pk):
+    """Edit purchase order"""
+    po = get_object_or_404(PurchaseOrder, pk=pk)
+    if request.method == 'POST':
+        form = PurchaseOrderForm(request.POST, instance=po)
+        if form.is_valid():
+            po = form.save()
+            po.calculate_net_amount()
+            messages.success(request, f'Purchase Order "{po.po_number}" updated successfully!')
+            return redirect('accounts:purchase_order_detail', pk=po.pk)
+    else:
+        form = PurchaseOrderForm(instance=po)
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Edit Purchase Order',
+        'form': form,
+        'po': po,
+    }
+    return render(request, 'accounts/purchase_order_form.html', context)
+
+@is_superuser
+def purchase_order_detail(request, pk):
+    """View purchase order details - items and linked costs"""
+    po = get_object_or_404(PurchaseOrder, pk=pk)
+
+    context = {
+        'active': 'accounts',
+        'page_title': f'PO - {po.po_number}',
+        'po': po,
+        'items': po.items.all(),
+        'costs': po.costs.all(),
+    }
+    return render(request, 'accounts/purchase_order_detail.html', context)
+
+# ---------------------------------------------------------------- cost sheets
+
+@is_superuser
 def cost_sheets(request):
     """List all cost sheets"""
     cost_sheets = CostSheet.objects.select_related('style', 'created_by').all()
-    
+
     style = request.GET.get('style')
     if style:
         cost_sheets = cost_sheets.filter(style_id=style)
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Cost Sheets',
         'cost_sheets': cost_sheets,
-        'styles': Style.objects.filter(is_active=True),
+        'styles': Project.objects.filter(is_active=True),
         'current_style': style,
     }
     return render(request, 'accounts/cost_sheets.html', context)
 
-@login_required
-@user_passes_test(is_accounts_or_admin)
+@is_superuser
 def add_cost_sheet(request):
     """Add new cost sheet"""
     if request.method == 'POST':
@@ -465,12 +676,12 @@ def add_cost_sheet(request):
             cost_sheet.created_by = request.user
             cost_sheet.save()
             cost_sheet.calculate_totals()
-            
-            messages.success(request, f'Cost sheet for "{cost_sheet.style.style_number}" created successfully!')
+
+            messages.success(request, f'Cost sheet for "{cost_sheet.style.project_number}" created successfully!')
             return redirect('accounts:cost_sheets')
     else:
         form = CostSheetForm()
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Add Cost Sheet',
@@ -478,11 +689,35 @@ def add_cost_sheet(request):
     }
     return render(request, 'accounts/cost_sheet_form.html', context)
 
-@login_required
+@is_superuser
+def edit_cost_sheet(request, pk):
+    """Edit cost sheet"""
+    cost_sheet = get_object_or_404(CostSheet, pk=pk)
+    if request.method == 'POST':
+        form = CostSheetForm(request.POST, instance=cost_sheet)
+        if form.is_valid():
+            cost_sheet = form.save()
+            cost_sheet.calculate_totals()
+            messages.success(request, f'Cost sheet for "{cost_sheet.style.project_number}" updated successfully!')
+            return redirect('accounts:cost_sheets')
+    else:
+        form = CostSheetForm(instance=cost_sheet)
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Edit Cost Sheet',
+        'form': form,
+        'cost_sheet': cost_sheet,
+    }
+    return render(request, 'accounts/cost_sheet_form.html', context)
+
+# -------------------------------------------------------------------- banks
+
+@is_superuser
 def banks_list(request):
     """List all bank accounts"""
     banks = BankAccount.objects.filter(is_active=True)
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Bank Accounts',
@@ -490,8 +725,7 @@ def banks_list(request):
     }
     return render(request, 'accounts/banks_list.html', context)
 
-@login_required
-@user_passes_test(is_accounts_or_admin)
+@is_superuser
 def add_bank(request):
     """Add new bank account"""
     if request.method == 'POST':
@@ -502,7 +736,7 @@ def add_bank(request):
             return redirect('accounts:banks_list')
     else:
         form = BankAccountForm()
-    
+
     context = {
         'active': 'accounts',
         'page_title': 'Add Bank Account',
@@ -510,152 +744,131 @@ def add_bank(request):
     }
     return render(request, 'accounts/bank_form.html', context)
 
-@login_required
+@is_superuser
+def edit_bank(request, pk):
+    """Edit bank account"""
+    bank = get_object_or_404(BankAccount, pk=pk)
+    if request.method == 'POST':
+        form = BankAccountForm(request.POST, instance=bank)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Bank account "{bank.account_name}" updated successfully!')
+            return redirect('accounts:banks_list')
+    else:
+        form = BankAccountForm(instance=bank)
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Edit Bank Account',
+        'form': form,
+        'bank': bank,
+    }
+    return render(request, 'accounts/bank_form.html', context)
+
+@is_superuser
+def bank_transactions_list(request):
+    """List all bank transactions"""
+    transactions = BankTransaction.objects.select_related('bank_account').all()
+
+    bank = request.GET.get('bank')
+    if bank:
+        transactions = transactions.filter(bank_account_id=bank)
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Bank Transactions',
+        'transactions': transactions,
+        'banks': BankAccount.objects.filter(is_active=True),
+        'current_bank': bank,
+    }
+    return render(request, 'accounts/bank_transactions_list.html', context)
+
+@is_superuser
+def add_bank_transaction(request):
+    """Add new bank transaction"""
+    if request.method == 'POST':
+        form = BankTransactionForm(request.POST)
+        if form.is_valid():
+            txn = form.save(commit=False)
+            txn.created_by = request.user
+            txn.save()
+            txn.process_transaction()
+            messages.success(request, f'Transaction of {txn.amount} recorded successfully!')
+            return redirect('accounts:bank_transactions_list')
+    else:
+        form = BankTransactionForm()
+
+    context = {
+        'active': 'accounts',
+        'page_title': 'Add Bank Transaction',
+        'form': form,
+    }
+    return render(request, 'accounts/bank_transaction_form.html', context)
+
+# ------------------------------------------------------------------ reports
+
+@is_superuser
 def financial_reports(request):
-    """Financial reports dashboard"""
+    """Financial reports dashboard - direct aggregation, no GL"""
     context = {
         'active': 'accounts',
         'page_title': 'Financial Reports',
     }
-    
-    # Income Statement
+
     current_month = date.today().month
     current_year = date.today().year
-    
+
     # Revenue
     total_revenue = SalesInvoice.objects.filter(
         status='paid',
         invoice_date__month=current_month,
         invoice_date__year=current_year
     ).aggregate(total=Sum('net_amount'))['total'] or 0
-    
-    # Cost of Goods Sold
+
+    # Cost of Goods Sold (estimated, from cost sheets)
     total_cogs = CostSheet.objects.filter(
         cost_date__month=current_month,
         cost_date__year=current_year
     ).aggregate(total=Sum('total_cost'))['total'] or 0
-    
-    # Gross Profit
+
     gross_profit = total_revenue - total_cogs
     gross_margin = (gross_profit / total_revenue * 100) if total_revenue > 0 else 0
-    
+
     context['total_revenue'] = total_revenue
     context['total_cogs'] = total_cogs
     context['gross_profit'] = gross_profit
     context['gross_margin'] = gross_margin
-    
-    # Balance Sheet
-    total_assets = ChartOfAccount.objects.filter(
-        account_type='asset'
-    ).aggregate(total=Sum('current_balance'))['total'] or 0
-    
-    total_liabilities = ChartOfAccount.objects.filter(
-        account_type='liability'
-    ).aggregate(total=Sum('current_balance'))['total'] or 0
-    
-    total_equity = ChartOfAccount.objects.filter(
-        account_type='equity'
-    ).aggregate(total=Sum('current_balance'))['total'] or 0
-    
-    context['total_assets'] = total_assets
-    context['total_liabilities'] = total_liabilities
-    context['total_equity'] = total_equity
-    
+
+    # Company-wide rollup across all active projects (PDF Section 10, aggregated)
+    projects = Project.objects.filter(is_active=True)
+
+    context['total_order_value'] = projects.aggregate(total=Sum('total_value'))['total'] or Decimal('0')
+
+    context['total_lc_amount'] = LetterOfCredit.objects.aggregate(total=Sum('lc_amount'))['total'] or Decimal('0')
+    total_lc_paid = LCPayment.objects.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    context['total_lc_paid'] = total_lc_paid
+    context['total_lc_outstanding'] = context['total_lc_amount'] - total_lc_paid
+
+    total_loan_amount = LCLoan.objects.aggregate(total=Sum('loan_amount'))['total'] or Decimal('0')
+    total_loan_repaid = LCLoan.objects.aggregate(total=Sum('repaid_amount'))['total'] or Decimal('0')
+    total_loan_interest = LCLoan.objects.aggregate(total=Sum('interest'))['total'] or Decimal('0')
+    total_loan_other = LCLoan.objects.aggregate(total=Sum('other_charges'))['total'] or Decimal('0')
+    context['total_loan_amount'] = total_loan_amount
+    context['total_loan_repaid'] = total_loan_repaid
+    context['total_loan_interest'] = total_loan_interest
+    context['total_loan_outstanding'] = total_loan_amount + total_loan_interest + total_loan_other - total_loan_repaid
+
+    total_po_cost = Cost.objects.filter(purchase_order__isnull=False).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    total_other_cost = Cost.objects.filter(purchase_order__isnull=True).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    context['total_po_cost'] = total_po_cost
+    context['total_other_cost'] = total_other_cost
+
+    total_costs = total_po_cost + total_other_cost + total_loan_interest
+    context['total_costs'] = total_costs
+
+    total_paid_invoices = SalesInvoice.objects.filter(status='paid').aggregate(total=Sum('net_amount'))['total'] or Decimal('0')
+    context['total_revenue_all_time'] = total_paid_invoices
+
+    context['overall_estimated_profit'] = context['total_order_value'] - total_costs
+
     return render(request, 'accounts/financial_reports.html', context)
-
-# Helper Functions
-
-def create_sales_journal_entry(invoice):
-    """Create journal entry for sales invoice"""
-    entry_number = f"JE-S{invoice.id:06d}"
-    
-    entry = JournalEntry.objects.create(
-        entry_number=entry_number,
-        journal_type='sale',
-        entry_date=invoice.invoice_date,
-        description=f"Sales invoice {invoice.invoice_number} - {invoice.buyer.buyer_name}",
-        reference=invoice.invoice_number,
-        reference_id=invoice.id,
-        created_by=invoice.created_by
-    )
-    
-    # Get accounts
-    receivable_account = ChartOfAccount.objects.get(account_code='1200')  # Accounts Receivable
-    revenue_account = ChartOfAccount.objects.get(account_code='4000')  # Sales Revenue
-    
-    # Create journal details
-    JournalDetail.objects.create(
-        journal_entry=entry,
-        account=receivable_account,
-        debit_amount=invoice.net_amount,
-        credit_amount=0,
-        notes=f"Invoice {invoice.invoice_number}"
-    )
-    
-    JournalDetail.objects.create(
-        journal_entry=entry,
-        account=revenue_account,
-        debit_amount=0,
-        credit_amount=invoice.net_amount,
-        notes=f"Invoice {invoice.invoice_number}"
-    )
-    
-    return entry
-
-def create_payment_journal_entry(payment):
-    """Create journal entry for payment"""
-    entry_number = f"JE-P{payment.id:06d}"
-    
-    entry = JournalEntry.objects.create(
-        entry_number=entry_number,
-        journal_type='payment',
-        entry_date=payment.payment_date,
-        description=f"Payment {payment.payment_number}",
-        reference=payment.payment_number,
-        reference_id=payment.id,
-        created_by=payment.created_by
-    )
-    
-    if payment.payment_type == 'receivable':
-        # For receivable payments
-        cash_account = ChartOfAccount.objects.get(account_code='1100')  # Cash
-        receivable_account = ChartOfAccount.objects.get(account_code='1200')  # Accounts Receivable
-        
-        JournalDetail.objects.create(
-            journal_entry=entry,
-            account=cash_account,
-            debit_amount=payment.amount,
-            credit_amount=0,
-            notes=f"Payment {payment.payment_number}"
-        )
-        
-        JournalDetail.objects.create(
-            journal_entry=entry,
-            account=receivable_account,
-            debit_amount=0,
-            credit_amount=payment.amount,
-            notes=f"Payment {payment.payment_number}"
-        )
-    
-    elif payment.payment_type == 'payable':
-        # For payable payments
-        cash_account = ChartOfAccount.objects.get(account_code='1100')  # Cash
-        payable_account = ChartOfAccount.objects.get(account_code='2200')  # Accounts Payable
-        
-        JournalDetail.objects.create(
-            journal_entry=entry,
-            account=payable_account,
-            debit_amount=payment.amount,
-            credit_amount=0,
-            notes=f"Payment {payment.payment_number}"
-        )
-        
-        JournalDetail.objects.create(
-            journal_entry=entry,
-            account=cash_account,
-            debit_amount=0,
-            credit_amount=payment.amount,
-            notes=f"Payment {payment.payment_number}"
-        )
-    
-    return entry

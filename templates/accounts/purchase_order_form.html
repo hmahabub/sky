@@ -1,9 +1,9 @@
 {% extends 'base/base.html' %}
 {% load static %}
 
-{% block title %}Add Account - SkyTex ERP{% endblock %}
+{% block title %}{% if po %}Edit{% else %}Add{% endif %} Purchase Order - SkyTex ERP{% endblock %}
 
-{% block page_title %}Add Account{% endblock %}
+{% block page_title %}{% if po %}Edit{% else %}Add{% endif %} Purchase Order{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
@@ -12,7 +12,7 @@
             <div class="stat-card">
                 <form method="post">
                     {% csrf_token %}
-                    
+
                     {% if form.errors %}
                         <div class="alert alert-danger">
                             <h6>Please fix the following errors:</h6>
@@ -23,62 +23,73 @@
                             </ul>
                         </div>
                     {% endif %}
-                    
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Account Code *</label>
-                                {{ form.account_code }}
+                                <label class="form-label">PO Number *</label>
+                                {{ form.po_number }}
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Account Name *</label>
-                                {{ form.account_name }}
+                                <label class="form-label">Supplier *</label>
+                                {{ form.supplier }}
                             </div>
                         </div>
                     </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">Account Type *</label>
-                                {{ form.account_type }}
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">Account Category *</label>
-                                {{ form.account_category }}
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">Parent Account</label>
-                                {{ form.parent_account }}
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">Opening Balance</label>
-                                {{ form.opening_balance }}
-                            </div>
-                        </div>
-                    </div>
-                    
+
                     <div class="mb-3">
-                        <label class="form-label">Description</label>
-                        {{ form.description }}
+                        <label class="form-label">Project</label>
+                        {{ form.style }}
                     </div>
-                    
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Order Date *</label>
+                                {{ form.order_date }}
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Delivery Date *</label>
+                                {{ form.delivery_date }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Total Amount *</label>
+                                {{ form.total_amount }}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Discount</label>
+                                {{ form.discount }}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Tax</label>
+                                {{ form.tax }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        {{ form.notes }}
+                    </div>
+
                     <div class="mt-4 border-top pt-3">
                         <button type="submit" class="btn btn-gradient">
-                            <i class="fas fa-save"></i> Create Account
+                            <i class="fas fa-save"></i> {% if po %}Update{% else %}Create{% endif %} Purchase Order
                         </button>
-                        <a href="{% url 'accounts:chart_of_accounts' %}" class="btn btn-secondary">
+                        <a href="{% url 'accounts:purchase_orders_list' %}" class="btn btn-secondary">
                             <i class="fas fa-times"></i> Cancel
                         </a>
                     </div>

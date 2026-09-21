@@ -25,12 +25,12 @@
     <div class="filter-section">
         <form method="get" class="row g-3">
             <div class="col-md-4">
-                <label class="form-label small">Style</label>
+                <label class="form-label small">Project</label>
                 <select name="style" class="form-select">
-                    <option value="">All Styles</option>
+                    <option value="">All Projects</option>
                     {% for style in styles %}
                     <option value="{{ style.id }}" {% if current_style == style.id|stringformat:"s" %}selected{% endif %}>
-                        {{ style.style_number }} - {{ style.buyer.buyer_name }}
+                        {{ style.project_number }} - {{ style.buyer.buyer_name }}
                     </option>
                     {% endfor %}
                 </select>
@@ -62,7 +62,7 @@
                     {% for cost_sheet in cost_sheets %}
                     <tr>
                         <td>
-                            <strong>{{ cost_sheet.style.style_number }}</strong>
+                            <strong>{{ cost_sheet.style.project_number }}</strong>
                             <br>
                             <small class="text-muted">{{ cost_sheet.style.buyer.buyer_name }}</small>
                         </td>
@@ -81,10 +81,7 @@
                         </td>
                         <td>
                             <div class="btn-group btn-group-sm">
-                                <a href="#" class="btn btn-outline-primary" title="View">
-                                    <i class="fas fa-eye"></i>
-                                </a>
-                                <a href="#" class="btn btn-outline-warning" title="Edit">
+                                <a href="{% url 'accounts:edit_cost_sheet' cost_sheet.pk %}" class="btn btn-outline-warning" title="Edit">
                                     <i class="fas fa-edit"></i>
                                 </a>
                             </div>

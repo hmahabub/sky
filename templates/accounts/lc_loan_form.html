@@ -1,18 +1,24 @@
 {% extends 'base/base.html' %}
 {% load static %}
 
-{% block title %}{% if bank %}Edit{% else %}Add{% endif %} Bank Account - SkyTex ERP{% endblock %}
+{% block title %}Add Loan Against LC - SkyTex ERP{% endblock %}
 
-{% block page_title %}{% if bank %}Edit{% else %}Add{% endif %} Bank Account{% endblock %}
+{% block page_title %}Add Loan - {{ lc.lc_number }}{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
     <div class="row justify-content-center">
         <div class="col-md-8">
             <div class="stat-card">
+                <div class="alert alert-info py-2 small mb-3">
+                    <i class="fas fa-info-circle"></i>
+                    Recording a loan against LC <strong>{{ lc.lc_number }}</strong>.
+                    Interest and other charges are flat one-time amounts, not an accruing schedule.
+                </div>
+
                 <form method="post">
                     {% csrf_token %}
-                    
+
                     {% if form.errors %}
                         <div class="alert alert-danger">
                             <h6>Please fix the following errors:</h6>
@@ -23,62 +29,58 @@
                             </ul>
                         </div>
                     {% endif %}
-                    
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Account Name *</label>
-                                {{ form.account_name }}
+                                <label class="form-label">Loan Date *</label>
+                                {{ form.loan_date }}
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Account Number *</label>
-                                {{ form.account_number }}
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">Bank Name *</label>
+                                <label class="form-label">Bank Name</label>
                                 {{ form.bank_name }}
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">Branch Name *</label>
-                                {{ form.branch_name }}
-                            </div>
-                        </div>
                     </div>
-                    
+
                     <div class="row">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <div class="mb-3">
-                                <label class="form-label">Account Type *</label>
-                                {{ form.account_type }}
+                                <label class="form-label">Loan Amount *</label>
+                                {{ form.loan_amount }}
                             </div>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <div class="mb-3">
-                                <label class="form-label">Opening Balance</label>
-                                {{ form.opening_balance }}
+                                <label class="form-label">Interest</label>
+                                {{ form.interest }}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Other Charges</label>
+                                {{ form.other_charges }}
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="mb-3">
-                        <label class="form-label">Notes</label>
-                        {{ form.notes }}
+                        <label class="form-label">Repaid Amount</label>
+                        {{ form.repaid_amount }}
                     </div>
-                    
+
+                    <div class="mb-3">
+                        <label class="form-label">Remarks</label>
+                        {{ form.remarks }}
+                    </div>
+
                     <div class="mt-4 border-top pt-3">
                         <button type="submit" class="btn btn-gradient">
-                            <i class="fas fa-save"></i> {% if bank %}Update{% else %}Create{% endif %} Bank Account
+                            <i class="fas fa-save"></i> Record Loan
                         </button>
-                        <a href="{% url 'accounts:banks_list' %}" class="btn btn-secondary">
+                        <a href="{% url 'accounts:lc_detail' lc.pk %}" class="btn btn-secondary">
                             <i class="fas fa-times"></i> Cancel
                         </a>
                     </div>

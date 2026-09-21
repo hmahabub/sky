@@ -1,9 +1,9 @@
 {% extends 'base/base.html' %}
 {% load static %}
 
-{% block title %}{% if buyer %}Edit{% else %}Add{% endif %} Buyer - SkyTex ERP{% endblock %}
+{% block title %}Add Letter of Credit - SkyTex ERP{% endblock %}
 
-{% block page_title %}{% if buyer %}Edit{% else %}Add{% endif %} Buyer{% endblock %}
+{% block page_title %}Add Letter of Credit{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
@@ -12,7 +12,7 @@
             <div class="stat-card">
                 <form method="post">
                     {% csrf_token %}
-                    
+
                     {% if form.errors %}
                         <div class="alert alert-danger">
                             <h6>Please fix the following errors:</h6>
@@ -23,71 +23,73 @@
                             </ul>
                         </div>
                     {% endif %}
-                    
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Buyer Code *</label>
-                                {{ form.buyer_code }}
+                                <label class="form-label">LC Number *</label>
+                                {{ form.lc_number }}
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Buyer Name *</label>
-                                {{ form.buyer_name }}
+                                <label class="form-label">Project *</label>
+                                {{ form.project }}
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Country *</label>
-                                {{ form.country }}
+                                <label class="form-label">LC Date *</label>
+                                {{ form.lc_date }}
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Email *</label>
-                                {{ form.email }}
+                                <label class="form-label">Expiry Date *</label>
+                                {{ form.expiry_date }}
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Phone *</label>
-                                {{ form.phone }}
+                                <label class="form-label">Bank Name *</label>
+                                {{ form.bank_name }}
                             </div>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-3">
                             <div class="mb-3">
-                                <label class="form-label">Credit Days</label>
-                                {{ form.credit_days }}
+                                <label class="form-label">LC Amount *</label>
+                                {{ form.lc_amount }}
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label class="form-label">Currency</label>
+                                {{ form.currency }}
                             </div>
                         </div>
                     </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">Credit Limit</label>
-                                {{ form.credit_limit }}
-                            </div>
-                        </div>
-                    </div>
-                    
+
                     <div class="mb-3">
-                        <label class="form-label">Address *</label>
-                        {{ form.address }}
+                        <label class="form-label">Status</label>
+                        {{ form.status }}
                     </div>
-                    
+
+                    <div class="mb-3">
+                        <label class="form-label">Remarks</label>
+                        {{ form.remarks }}
+                    </div>
+
                     <div class="mt-4 border-top pt-3">
                         <button type="submit" class="btn btn-gradient">
-                            <i class="fas fa-save"></i> {% if buyer %}Update{% else %}Create{% endif %} Buyer
+                            <i class="fas fa-save"></i> Create LC
                         </button>
-                        <a href="{% url 'accounts:buyers_list' %}" class="btn btn-secondary">
+                        <a href="{% url 'accounts:lc_list' %}" class="btn btn-secondary">
                             <i class="fas fa-times"></i> Cancel
                         </a>
                     </div>

@@ -69,11 +69,33 @@ def inventory_dashboard(request):
         is_active=True
     ).count()
     
+    # Assets & Supplies
+    context['total_machines'] = Machine.objects.exclude(status__in=['sold', 'scrapped']).count()
+    context['machines_needing_attention'] = Machine.objects.filter(
+        status__in=['under_maintenance', 'broken_down']
+    ).count()
+
+    context['total_spare_parts'] = SparePart.objects.filter(is_active=True).count()
+    context['spare_parts_stock'] = SparePart.objects.filter(is_active=True).aggregate(
+        total=Sum('current_stock')
+    )['total'] or 0
+    context['low_spare_parts_count'] = SparePart.objects.filter(
+        current_stock__lte=F('min_stock'), is_active=True
+    ).count()
+
+    context['total_stationery_items'] = StationeryItem.objects.filter(is_active=True).count()
+    context['stationery_stock'] = StationeryItem.objects.filter(is_active=True).aggregate(
+        total=Sum('current_stock')
+    )['total'] or 0
+    context['low_stationery_count'] = StationeryItem.objects.filter(
+        current_stock__lte=F('min_stock'), is_active=True
+    ).count()
+
     # Recent Receipts
     context['recent_receipts'] = GoodsReceipt.objects.select_related('supplier').order_by('-receipt_date')[:5]
     
     # Recent Dispatches
-    context['recent_dispatches'] = Dispatch.objects.select_related('buyer').order_by('-dispatch_date')[:5]
+    context['recent_dispatches'] = Dispatch.objects.select_related('project').order_by('-dispatch_date')[:5]
     
     # Stock Movement Chart Data
     last_7_days = [date.today() - timedelta(days=x) for x in range(6, -1, -1)]
@@ -724,7 +746,7 @@ def trim_stock_ledger(request, pk):
 @login_required
 def production_issues(request):
     """List all production issues"""
-    issues = ProductionIssue.objects.select_related('style', 'department', 'issued_by').all()
+    issues = ProductionIssue.objects.select_related('project', 'department', 'issued_by').all()
     
     context = {
         'active': 'inventory',
@@ -772,7 +794,7 @@ def add_production_issue(request):
                             reference_id=issue.pk,
                             fabric=fabric,
                             quantity=-detail.quantity_issued,
-                            notes=f"Issued to production - {issue.style.style_number}",
+                            notes=f"Issued to production - {issue.project.project_number}",
                             created_by=request.user,
                         )
                     elif detail.trim:
@@ -785,7 +807,7 @@ def add_production_issue(request):
                             reference_id=issue.pk,
                             trim=trim,
                             quantity=-detail.quantity_issued,
-                            notes=f"Issued to production - {issue.style.style_number}",
+                            notes=f"Issued to production - {issue.project.project_number}",
                             created_by=request.user,
                         )
 
@@ -965,7 +987,7 @@ def finished_goods_stock_ledger(request, pk):
 @login_required
 def dispatches(request):
     """List all dispatches"""
-    dispatches = Dispatch.objects.select_related('buyer', 'style', 'created_by').all()
+    dispatches = Dispatch.objects.select_related('project', 'project__buyer', 'created_by').all()
     
     # Filter by status
     status = request.GET.get('status')
@@ -1022,7 +1044,7 @@ def add_dispatch(request):
                             reference_id=dispatch.pk,
                             finished_goods=fg,
                             quantity=-detail.quantity,
-                            notes=f"Dispatched to {dispatch.buyer.buyer_name}",
+                            notes=f"Dispatched to {dispatch.project.buyer.buyer_name}",
                             created_by=request.user,
                         )
             
@@ -1073,7 +1095,7 @@ def dispatch_detail(request, pk):
     """Full view of a dispatch: header, line items, and status/shipment approval controls."""
     dispatch = get_object_or_404(
         Dispatch.objects.select_related(
-            'style', 'buyer', 'purchase_order', 'created_by',
+            'project', 'project__buyer', 'created_by',
             'shipment_requested_by', 'shipment_approved_by',
         ),
         pk=pk,
@@ -1293,7 +1315,7 @@ def pending_adjustments(request):
     ).prefetch_related('details__fabric_roll')
 
     dispatch_shipments = Dispatch.objects.filter(shipment_approval='pending').select_related(
-        'buyer', 'style', 'shipment_requested_by'
+        'project', 'project__buyer', 'shipment_requested_by'
     )
 
     machine_events = MachineEvent.objects.filter(status='pending').select_related(

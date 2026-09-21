@@ -26,7 +26,7 @@ class FabricForm(forms.ModelForm):
     class Meta:
         model = Fabric
         fields = ['fabric_name', 'fabric_type', 'color', 'gsm',
-                 'width', 'supplier', 'style', 'purchase_order', 'buyer',
+                 'width', 'supplier', 'project', 'purchase_order', 'buyer',
                  'unit', 'unit_price', 'min_stock', 'max_stock', 'description']
         widgets = {
             'fabric_name': forms.TextInput(attrs={'class': 'form-control'}),
@@ -35,7 +35,7 @@ class FabricForm(forms.ModelForm):
             'gsm': forms.NumberInput(attrs={'class': 'form-control'}),
             'width': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
             'supplier': forms.Select(attrs={'class': 'form-select'}),
-            'style': forms.Select(attrs={'class': 'form-select'}),
+            'project': forms.Select(attrs={'class': 'form-select'}),
             'purchase_order': forms.Select(attrs={'class': 'form-select'}),
             'buyer': forms.Select(attrs={'class': 'form-select'}),
             'unit': forms.Select(attrs={'class': 'form-select'}),
@@ -137,11 +137,11 @@ class TrimReceiptDetailForm(forms.ModelForm):
 class ProductionIssueForm(forms.ModelForm):
     class Meta:
         model = ProductionIssue
-        fields = ['issue_number', 'style', 'issue_date', 'department',
+        fields = ['issue_number', 'project', 'issue_date', 'department',
                  'production_line', 'notes']
         widgets = {
             'issue_number': forms.TextInput(attrs={'class': 'form-control'}),
-            'style': forms.Select(attrs={'class': 'form-select'}),
+            'project': forms.Select(attrs={'class': 'form-select'}),
             'issue_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'department': forms.Select(attrs={'class': 'form-select'}),
             'production_line': forms.TextInput(attrs={'class': 'form-control'}),
@@ -204,15 +204,13 @@ class FinishedGoodsStockInForm(forms.Form):
 class DispatchForm(forms.ModelForm):
     class Meta:
         model = Dispatch
-        fields = ['dispatch_number', 'style', 'buyer', 'purchase_order', 'dispatch_date',
+        fields = ['dispatch_number', 'project', 'dispatch_date',
                  'total_cartons', 'shipping_line', 'vessel_name', 'vessel_number',
                  'container_number', 'container_size', 'bl_number', 'bl_date',
                  'ex_factory_date', 'shipping_agent', 'notes']
         widgets = {
             'dispatch_number': forms.TextInput(attrs={'class': 'form-control'}),
-            'style': forms.Select(attrs={'class': 'form-select'}),
-            'buyer': forms.Select(attrs={'class': 'form-select'}),
-            'purchase_order': forms.Select(attrs={'class': 'form-select'}),
+            'project': forms.Select(attrs={'class': 'form-select'}),
             'dispatch_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'total_cartons': forms.NumberInput(attrs={'class': 'form-control'}),
             'shipping_line': forms.TextInput(attrs={'class': 'form-control'}),

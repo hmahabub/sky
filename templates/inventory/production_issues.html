@@ -28,7 +28,7 @@
                 <thead>
                     <tr>
                         <th>Issue #</th>
-                        <th>Style</th>
+                        <th>Project</th>
                         <th>Department</th>
                         <th>Production Line</th>
                         <th>Date</th>
@@ -40,7 +40,7 @@
                     {% for issue in issues %}
                     <tr>
                         <td><strong>{{ issue.issue_number }}</strong></td>
-                        <td>{{ issue.style.style_number }}</td>
+                        <td>{{ issue.project.project_number }}</td>
                         <td>{{ issue.department.name|default:"-" }}</td>
                         <td>{{ issue.production_line }}</td>
                         <td>{{ issue.issue_date }}</td>

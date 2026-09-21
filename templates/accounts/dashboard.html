@@ -91,11 +91,11 @@
                     <h5>{{ total_suppliers }}</h5>
                 </div>
                 <div class="mb-3">
-                    <small class="text-muted">Active Styles</small>
-                    <h5>{{ total_styles }}</h5>
+                    <small class="text-muted">Active Projects</small>
+                    <h5>{{ total_projects }}</h5>
                 </div>
             </div>
-            
+
             <div class="stat-card">
                 <h6 class="mb-3">Quick Actions</h6>
                 <div class="d-grid gap-2">
@@ -105,8 +105,8 @@
                     <a href="{% url 'accounts:add_payment' %}" class="btn btn-outline-success btn-sm">
                         <i class="fas fa-hand-holding-usd"></i> Record Payment
                     </a>
-                    <a href="{% url 'accounts:add_journal_entry' %}" class="btn btn-outline-primary btn-sm">
-                        <i class="fas fa-book"></i> Journal Entry
+                    <a href="{% url 'accounts:add_lc' %}" class="btn btn-outline-primary btn-sm">
+                        <i class="fas fa-file-contract"></i> Add LC
                     </a>
                 </div>
             </div>

@@ -1,9 +1,9 @@
 {% extends 'base/base.html' %}
 {% load static %}
 
-{% block title %}Add Style - SkyTex ERP{% endblock %}
+{% block title %}{% if project %}Edit{% else %}Add{% endif %} Project - SkyTex ERP{% endblock %}
 
-{% block page_title %}Add New Style{% endblock %}
+{% block page_title %}{% if project %}Edit{% else %}Add New{% endif %} Project{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
@@ -12,7 +12,7 @@
             <div class="stat-card">
                 <form method="post">
                     {% csrf_token %}
-                    
+
                     {% if form.errors %}
                         <div class="alert alert-danger">
                             <h6>Please fix the following errors:</h6>
@@ -23,12 +23,12 @@
                             </ul>
                         </div>
                     {% endif %}
-                    
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label class="form-label">Style Number *</label>
-                                {{ form.style_number }}
+                                <label class="form-label">Project Number *</label>
+                                {{ form.project_number }}
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -38,12 +38,12 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="mb-3">
                         <label class="form-label">Description *</label>
                         {{ form.description }}
                     </div>
-                    
+
                     <div class="row">
                         <div class="col-md-4">
                             <div class="mb-3">
@@ -59,42 +59,27 @@
                         </div>
                         <div class="col-md-4">
                             <div class="mb-3">
+                                <label class="form-label">Currency</label>
+                                {{ form.currency }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
                                 <label class="form-label">CM Charge</label>
                                 {{ form.cm_charge }}
                             </div>
                         </div>
-                    </div>
-                    
-                    <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label class="form-label">Agent Commission</label>
                                 {{ form.agent_commission }}
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">Status</label>
-                                {{ form.status }}
-                            </div>
-                        </div>
                     </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">LC Number</label>
-                                {{ form.lc_number }}
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">LC Date</label>
-                                {{ form.lc_date }}
-                            </div>
-                        </div>
-                    </div>
-                    
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
@@ -109,12 +94,22 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <div class="mb-3">
+                        <label class="form-label">Status</label>
+                        {{ form.status }}
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Remarks</label>
+                        {{ form.remarks }}
+                    </div>
+
                     <div class="mt-4 border-top pt-3">
                         <button type="submit" class="btn btn-gradient">
-                            <i class="fas fa-save"></i> Create Style
+                            <i class="fas fa-save"></i> {% if project %}Update{% else %}Create{% endif %} Project
                         </button>
-                        <a href="{% url 'accounts:styles_list' %}" class="btn btn-secondary">
+                        <a href="{% url 'accounts:projects_list' %}" class="btn btn-secondary">
                             <i class="fas fa-times"></i> Cancel
                         </a>
                     </div>
@@ -123,23 +118,4 @@
         </div>
     </div>
 </div>
-
-<script>
-    // Auto-calculate total value
-    document.addEventListener('DOMContentLoaded', function() {
-        const quantity = document.getElementById('id_order_quantity');
-        const unitPrice = document.getElementById('id_unit_price');
-        
-        function calculateTotal() {
-            if (quantity.value && unitPrice.value) {
-                const total = parseFloat(quantity.value) * parseFloat(unitPrice.value);
-                // You can display this somewhere or store it
-                console.log('Total Value:', total);
-            }
-        }
-        
-        quantity.addEventListener('input', calculateTotal);
-        unitPrice.addEventListener('input', calculateTotal);
-    });
-</script>
 {% endblock %}

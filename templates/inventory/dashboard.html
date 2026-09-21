@@ -79,7 +79,70 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- Assets & Supplies -->
+    <div class="row">
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">Machines</h6>
+                        <h3 class="mb-0">{{ total_machines }}</h3>
+                        <small class="text-info">In service</small>
+                    </div>
+                    <div class="card-icon bg-secondary bg-opacity-10 text-secondary">
+                        <i class="fas fa-cogs fa-2x"></i>
+                    </div>
+                </div>
+                {% if machines_needing_attention > 0 %}
+                <div class="mt-2">
+                    <span class="badge bg-warning">{{ machines_needing_attention }} need attention</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">Spare Parts</h6>
+                        <h3 class="mb-0">{{ total_spare_parts }}</h3>
+                        <small class="text-info">{{ spare_parts_stock|floatformat:0 }} units in stock</small>
+                    </div>
+                    <div class="card-icon bg-primary bg-opacity-10 text-primary">
+                        <i class="fas fa-tools fa-2x"></i>
+                    </div>
+                </div>
+                {% if low_spare_parts_count > 0 %}
+                <div class="mt-2">
+                    <span class="badge bg-warning">{{ low_spare_parts_count }} items low stock</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">Stationery Items</h6>
+                        <h3 class="mb-0">{{ total_stationery_items }}</h3>
+                        <small class="text-info">{{ stationery_stock|floatformat:0 }} units in stock</small>
+                    </div>
+                    <div class="card-icon bg-success bg-opacity-10 text-success">
+                        <i class="fas fa-pencil-ruler fa-2x"></i>
+                    </div>
+                </div>
+                {% if low_stationery_count > 0 %}
+                <div class="mt-2">
+                    <span class="badge bg-warning">{{ low_stationery_count }} items low stock</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
     <!-- Charts -->
     <div class="row">
         <div class="col-md-8">
@@ -162,7 +225,7 @@
                             {% for dispatch in recent_dispatches %}
                             <tr>
                                 <td>{{ dispatch.dispatch_number }}</td>
-                                <td>{{ dispatch.buyer.buyer_name }}</td>
+                                <td>{{ dispatch.project.buyer.buyer_name }}</td>
                                 <td>{{ dispatch.dispatch_date }}</td>
                                 <td>
                                     <span class="badge bg-{% if dispatch.status == 'delivered' %}success{% elif dispatch.status == 'shipped' %}info{% elif dispatch.status == 'dispatched' %}warning{% else %}secondary{% endif %}">
